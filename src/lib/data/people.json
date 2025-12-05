@@ -1,0 +1,54 @@
+[
+  {
+    "id": "edvard-munch",
+    "name": "Edvard Munch",
+    "birthYear": 1863,
+    "deathYear": 1944,
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4a/Edvard_Munch_1933-2.jpg",
+    "wikipediaUrl": "https://no.wikipedia.org/wiki/Edvard_Munch",
+    "summary": "Edvard Munch (1863–1944) var en norsk maler, grafiker, tidlig representant for ekspresjonismen og den internasjonalt best kjente norske bildende kunstner.  Munch debuterte i 1883 og produserte store mengder hele livet, rundt 28 000 arbeider finnes etter Munch, og han er med det trolig en av verdens mest produktive bildekunstnerne.  Han testamenterte rundt 20 000 arbeider til Oslo kommune.",
+    "occupations": [
+      "Maler"
+    ],
+    "color": "#e4572e"
+  },
+  {
+    "id": "erling-braut-haaland",
+    "name": "Erling Braut Haaland",
+    "birthYear": 2000,
+    "deathYear": null,
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/7/71/Erling_Haaland_June_2025.jpg",
+    "wikipediaUrl": "https://no.wikipedia.org/wiki/Erling_Braut_Haaland",
+    "summary": "Erling Braut Haaland (født Håland;[13] 2000) er en norsk fotballspiller som spiller for den engelske klubben Manchester City[14] og det norske landslaget, han er Norges mestscorende landslagsspiller i fotball gjennom tidene. [15] Han har tidligere spilt for Bryne, Molde, Red Bull Salzburg og Borussia Dortmund.  Han er ligamester i Østerrike og England, cupmester i Østerrike og Tyskland.",
+    "occupations": [
+      "Fotballspiller"
+    ],
+    "color": "#0081a7"
+  },
+  {
+    "id": "henrik-wergeland",
+    "name": "Henrik Wergeland",
+    "birthYear": 1808,
+    "deathYear": 1845,
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Wergeland_daguerreotype.jpg",
+    "wikipediaUrl": "https://no.wikipedia.org/wiki/Henrik_Wergeland",
+    "summary": "Henrik Arnold Wergeland (1808–1845) var en norsk dikter og Norges første riksarkivar.  Hans diktning spenner fra kosmologisk poesi over barnedikt til undergangsdikt og diktverk med sosial tendens, bl. a.",
+    "occupations": [
+      "Forfatter"
+    ],
+    "color": "#6f4a8e"
+  },
+  {
+    "id": "kare-willoch",
+    "name": "Kåre Willoch",
+    "birthYear": 1928,
+    "deathYear": 2021,
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/46/Willoch_1983_%28high_resolution%2C_cropped%29.jpg",
+    "wikipediaUrl": "https://no.wikipedia.org/wiki/Kåre_Willoch",
+    "summary": "Kåre Isaachsen Willoch (1928–2021) var en norsk politiker (H) som var Norges statsminister fra 1981 til 1986. [11][12] Han var Høyres generalsekretær fra 1963 til 1965, leder av Høyre fra 1970 til 1974, handelsminister i 1963 og 1965–1970 og Norges statsminister fra 1981 til 1986.  Etter at han trakk seg fra rikspolitikken var han fylkesmann i Oslo og Akershus (1989–1998) og styreleder i NRK (1998–2000).",
+    "occupations": [
+      "Politiker"
+    ],
+    "color": "#1b998b"
+  }
+]
