@@ -26,13 +26,13 @@
 	}
 </script>
 
-<div class="min-h-screen bg-gray-50 dark:bg-gray-950">
+<div class="min-h-screen bg-white dark:bg-[#0a0a0a]">
 	<slot />
 
 	<!-- Dark mode toggle -->
 	<button
 		onclick={toggleDarkMode}
-		class="fixed bottom-6 right-6 p-3 bg-white dark:bg-gray-800 rounded-full shadow-lg hover:shadow-xl transition-shadow z-50 border border-gray-200 dark:border-gray-700"
+		class="fixed bottom-6 right-6 p-3.5 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-xl shadow-lg hover:shadow-xl transition-all z-50 border border-gray-200 dark:border-gray-800 hover:scale-105"
 		aria-label="Toggle dark mode"
 	>
 		{#if darkMode}
