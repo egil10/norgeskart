@@ -1,6 +1,4 @@
 {
   "buildCommand": "npm run build",
-  "framework": "sveltekit",
-  "nodeVersion": "20.x"
+  "framework": "sveltekit"
 }
-
