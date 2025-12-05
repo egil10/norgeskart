@@ -30,9 +30,21 @@ cd norgeskart
 npm install
 ```
 
-3. Generate person data (scrapes Wikipedia):
+3. Generate person data (fetches from Wikidata):
 ```bash
+# List available categories
+npm run generate:data:list
+
+# Fetch specific category (fast, recommended)
+npm run generate:data -- --category=footballer
+npm run generate:data -- --category=artist
+npm run generate:data -- --category=writer
+
+# Fetch all (slower, may timeout)
 npm run generate:data
+
+# Merge all category files into final dataset
+npm run generate:data:merge
 ```
 
 4. Start the development server:

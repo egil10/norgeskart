@@ -30,6 +30,7 @@ interface FetchState {
 	processedIds: Set<string>;
 	totalRowsFetched: number;
 	lastUpdate: string;
+	category?: string;
 }
 
 const colors = {
@@ -51,8 +52,26 @@ const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const CURRENT_YEAR = new Date().getFullYear();
 const MIN_YEAR = 800;
 const MAX_YEAR = CURRENT_YEAR;
-const BATCH_SIZE = 5000;
-const CHUNK_SIZE = 1000; // Smaller chunks for reliability
+const CHUNK_SIZE = 1000;
+
+// Wikidata occupation Q-IDs by category
+const OCCUPATION_IDS: Record<string, string[]> = {
+	footballer: ['Q937857'], // association football player
+	artist: ['Q1028181', 'Q42973'], // painter, artist
+	writer: ['Q36180', 'Q49757'], // writer, author
+	politician: ['Q82955'], // politician
+	scientist: ['Q901'], // scientist
+	musician: ['Q639669'], // musician
+	business: ['Q43845'], // businessperson
+	explorer: ['Q11900058'], // explorer
+	actor: ['Q33999'], // actor
+	military: ['Q47064'], // military personnel
+	religious: ['Q42603'], // religious
+	academic: ['Q3400985'], // academic
+	engineer: ['Q81096'], // engineer
+	athlete: ['Q2066131'], // athlete
+};
+
 const STATE_FILE = join(process.cwd(), 'src', 'lib', 'data', '.fetch-state.json');
 const OUTPUT_FILE = join(process.cwd(), 'src', 'lib', 'data', 'people.json');
 const TEMP_FILE = join(process.cwd(), 'src', 'lib', 'data', 'people.temp.json');
@@ -81,61 +100,118 @@ function logInfo(message: string) {
 	console.log(`${colors.cyan}ℹ${colors.reset} ${colors.cyan}${message}${colors.reset}`);
 }
 
-function saveState(state: FetchState) {
-	writeFileSync(STATE_FILE, JSON.stringify({
+function getStateFile(category?: string): string {
+	if (category) {
+		return join(process.cwd(), 'src', 'lib', 'data', `.fetch-state-${category}.json`);
+	}
+	return STATE_FILE;
+}
+
+function getTempFile(category?: string): string {
+	if (category) {
+		return join(process.cwd(), 'src', 'lib', 'data', `people-${category}.temp.json`);
+	}
+	return TEMP_FILE;
+}
+
+function saveState(state: FetchState, category?: string) {
+	const stateFile = getStateFile(category);
+	writeFileSync(stateFile, JSON.stringify({
 		...state,
 		processedIds: Array.from(state.processedIds),
-		lastUpdate: new Date().toISOString()
+		lastUpdate: new Date().toISOString(),
+		category
 	}, null, 2), 'utf-8');
 }
 
-function loadState(): FetchState | null {
-	if (!existsSync(STATE_FILE)) return null;
+function loadState(category?: string): FetchState | null {
+	const stateFile = getStateFile(category);
+	if (!existsSync(stateFile)) return null;
 	
 	try {
-		const data = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+		const data = JSON.parse(readFileSync(stateFile, 'utf-8'));
 		return {
 			...data,
-			processedIds: new Set(data.processedIds || [])
+			processedIds: new Set(data.processedIds || []),
+			category: category || data.category
 		};
 	} catch {
 		return null;
 	}
 }
 
-function saveTempData(people: PersonData[]) {
-	writeFileSync(TEMP_FILE, JSON.stringify(people, null, 2), 'utf-8');
+function saveTempData(people: PersonData[], category?: string) {
+	const tempFile = getTempFile(category);
+	writeFileSync(tempFile, JSON.stringify(people, null, 2), 'utf-8');
 }
 
-function loadTempData(): PersonData[] {
-	if (!existsSync(TEMP_FILE)) return [];
+function loadTempData(category?: string): PersonData[] {
+	const tempFile = getTempFile(category);
+	if (!existsSync(tempFile)) return [];
 	
 	try {
-		return JSON.parse(readFileSync(TEMP_FILE, 'utf-8'));
+		return JSON.parse(readFileSync(tempFile, 'utf-8'));
 	} catch {
 		return [];
 	}
+}
+
+function mergeAllCategoryData(): PersonData[] {
+	const allPeople = new Map<string, PersonData>();
+	
+	// Load all category temp files
+	for (const category of Object.keys(OCCUPATION_IDS)) {
+		const categoryData = loadTempData(category);
+		categoryData.forEach(p => {
+			if (!allPeople.has(p.id)) {
+				allPeople.set(p.id, p);
+			} else {
+				// Merge occupations
+				const existing = allPeople.get(p.id)!;
+				const mergedOccupations = [...new Set([...existing.occupations, ...p.occupations])];
+				existing.occupations = mergedOccupations.slice(0, 5);
+			}
+		});
+	}
+	
+	// Also load general temp file
+	const generalData = loadTempData();
+	generalData.forEach(p => {
+		if (!allPeople.has(p.id)) {
+			allPeople.set(p.id, p);
+		}
+	});
+	
+	return Array.from(allPeople.values());
 }
 
 function saveFinalData(people: PersonData[]) {
 	writeFileSync(OUTPUT_FILE, JSON.stringify(people, null, 2), 'utf-8');
 }
 
-async function queryWikidata(offset = 0, limit = 1000, testMode = false): Promise<{ rows: SparqlRow[]; hasMore: boolean }> {
+async function queryWikidata(
+	offset = 0, 
+	limit = 1000, 
+	category?: string
+): Promise<{ rows: SparqlRow[]; hasMore: boolean }> {
 	let query: string;
 	
-	if (testMode) {
+	if (category && OCCUPATION_IDS[category]) {
+		// Category-specific query - much faster!
+		const occupationIds = OCCUPATION_IDS[category];
+		const occupationFilter = occupationIds.map(id => `wd:${id}`).join(' || ');
+		
 		query = `
 			SELECT ?person ?personLabel ?personDescription ?birth ?death ?image ?occLabel ?article WHERE {
 				?person wdt:P31 wd:Q5.
 				?person wdt:P27 wd:Q20.
-				?person wdt:P106 wd:Q937857.
+				?person wdt:P106 ?occ.
+				FILTER (?occ = ${occupationIds.map(id => `wd:${id}`).join(' || ?occ = ')}).
 				
 				OPTIONAL { ?person wdt:P569 ?birth . }
 				OPTIONAL { ?person wdt:P570 ?death . }
 				OPTIONAL { ?person wdt:P18 ?image . }
 				OPTIONAL { 
-					?person wdt:P106 ?occ .
 					?occ rdfs:label ?occLabel 
 					FILTER (lang(?occLabel) = "no" || lang(?occLabel) = "en") 
 				}
@@ -153,6 +229,7 @@ async function queryWikidata(offset = 0, limit = 1000, testMode = false): Promis
 			OFFSET ${offset}
 		`;
 	} else {
+		// General query (all Norwegians)
 		query = `
 			SELECT ?person ?personLabel ?personDescription ?birth ?death ?image ?occLabel ?article WHERE {
 				?person wdt:P31 wd:Q5.
@@ -181,8 +258,8 @@ async function queryWikidata(offset = 0, limit = 1000, testMode = false): Promis
 		`;
 	}
 
-	const modeText = testMode ? `${colors.yellow}[TEST]${colors.reset} ` : '';
-	log(`${colors.blue}→${colors.reset} ${modeText}Querying offset ${offset} (limit: ${limit})...`, colors.dim);
+	const categoryText = category ? `${colors.magenta}[${category.toUpperCase()}]${colors.reset} ` : '';
+	log(`${colors.blue}→${colors.reset} ${categoryText}Querying offset ${offset} (limit: ${limit})...`, colors.dim);
 	
 	const startTime = Date.now();
 	const url = `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
@@ -241,23 +318,45 @@ function extractImageUrl(imageValue: string | undefined): string | null {
 	
 	let filename: string;
 	
-	if (imageValue.startsWith('http')) {
+	if (imageValue.includes('http')) {
+		// Extract filename from various URL formats
 		if (imageValue.includes('/wiki/Special:FilePath/')) {
-			filename = imageValue.split('/wiki/Special:FilePath/')[1].split('?')[0];
+			filename = decodeURIComponent(imageValue.split('/wiki/Special:FilePath/')[1].split('?')[0]);
 		} else if (imageValue.includes('/wiki/File:')) {
-			filename = imageValue.split('/wiki/File:')[1].split('?')[0];
+			filename = decodeURIComponent(imageValue.split('/wiki/File:')[1].split('?')[0]);
+		} else if (imageValue.includes('upload.wikimedia.org')) {
+			// Already a direct Commons URL - extract filename and rebuild properly
+			const parts = imageValue.split('/');
+			const fileIndex = parts.findIndex(p => p.includes('.'));
+			if (fileIndex > 0) {
+				filename = parts.slice(fileIndex).join('/');
+				// Remove thumbnail size if present
+				filename = filename.replace(/\d+px-/, '');
+			} else {
+				return imageValue; // Return as-is if we can't parse
+			}
 		} else {
-			return imageValue;
+			return null;
 		}
 	} else {
+		// Just filename (raw P18 value)
 		filename = decodeURIComponent(imageValue);
 	}
 	
-	const encodedFilename = encodeURIComponent(filename);
-	const firstChar = encodedFilename.charAt(0);
-	const firstTwo = encodedFilename.substring(0, 2);
+	// Clean filename
+	filename = filename.replace(/\s/g, '_').replace(/^_+|_+$/g, '');
+	if (!filename) return null;
 	
-	return `https://upload.wikimedia.org/wikipedia/commons/${firstChar}/${firstTwo}/${encodedFilename}`;
+	// Get first char and first two chars for Commons directory structure
+	const firstChar = filename.charAt(0);
+	const firstTwo = filename.substring(0, 2);
+	
+	// Encode filename properly (space to underscore, etc.)
+	const encodedFilename = encodeURIComponent(filename).replace(/%20/g, '_');
+	
+	// Construct Commons thumbnail URL (200px - good balance of quality/size)
+	// For full resolution, remove '/200px-' part
+	return `https://upload.wikimedia.org/wikipedia/commons/thumb/${firstChar}/${firstTwo}/${encodedFilename}/200px-${encodedFilename}`;
 }
 
 function processRows(rows: SparqlRow[], existingPeople: Map<string, PersonData>): PersonData[] {
@@ -283,7 +382,7 @@ function processRows(rows: SparqlRow[], existingPeople: Map<string, PersonData>)
 				continue;
 			}
 			
-			if (birthYear === null) continue; // Skip persons without birth year
+			if (birthYear === null) continue;
 			
 			personMap.set(personId, {
 				id: personId,
@@ -326,152 +425,153 @@ function processRows(rows: SparqlRow[], existingPeople: Map<string, PersonData>)
 	return newPeople;
 }
 
+async function fetchCategory(category?: string) {
+	const startTime = Date.now();
+	
+	const categoryLabel = category ? category.toUpperCase() : 'ALL';
+	logHeader(`🎯 Fetching: ${categoryLabel}`);
+	
+	const state = loadState(category);
+	const existingPeople = new Map<string, PersonData>();
+	
+	if (state) {
+		logInfo(`Resuming from previous session:`);
+		log(`  Last offset: ${state.lastOffset.toLocaleString()}`, colors.dim);
+		log(`  Total rows: ${state.totalRowsFetched.toLocaleString()}`, colors.dim);
+		log(`  Persons: ${state.processedIds.size.toLocaleString()}`, colors.dim);
+		
+		const tempData = loadTempData(category);
+		tempData.forEach(p => existingPeople.set(p.id, p));
+		logSuccess(`Loaded ${tempData.length.toLocaleString()} existing persons\n`);
+	}
+	
+	const currentState: FetchState = {
+		lastOffset: state?.lastOffset || 0,
+		processedIds: state?.processedIds || new Set(),
+		totalRowsFetched: state?.totalRowsFetched || 0,
+		lastUpdate: new Date().toISOString(),
+		category
+	};
+	
+	let offset = currentState.lastOffset;
+	const maxRows = 50000;
+	let consecutiveFailures = 0;
+	const maxFailures = 3;
+	let chunkCount = 0;
+	
+	log(`${colors.cyan}Fetching in chunks of ${CHUNK_SIZE} rows${colors.reset}\n`);
+	
+	while (offset < maxRows && consecutiveFailures < maxFailures) {
+		try {
+			const { rows, hasMore } = await queryWikidata(offset, CHUNK_SIZE, category);
+			
+			if (rows.length === 0) {
+				logWarning(`No more data at offset ${offset}`);
+				break;
+			}
+			
+			const newPeople = processRows(rows, existingPeople);
+			newPeople.forEach(p => {
+				if (!existingPeople.has(p.id)) {
+					existingPeople.set(p.id, p);
+					currentState.processedIds.add(p.id);
+				}
+			});
+			
+			chunkCount++;
+			currentState.lastOffset = offset + rows.length;
+			currentState.totalRowsFetched += rows.length;
+			
+			log(`  ${colors.dim}📊 ${currentState.processedIds.size.toLocaleString()} persons (offset: ${currentState.lastOffset})${colors.reset}\n`);
+			
+			if (chunkCount % 3 === 0 || !hasMore) {
+				const allPeople = Array.from(existingPeople.values());
+				allPeople.sort((a, b) => a.birthYear - b.birthYear);
+				saveTempData(allPeople, category);
+				saveState(currentState, category);
+				logSuccess(`Progress saved: ${allPeople.length.toLocaleString()} persons\n`);
+			}
+			
+			consecutiveFailures = 0;
+			offset += rows.length;
+			
+			if (!hasMore) {
+				logInfo('Reached end of data');
+				break;
+			}
+			
+			await new Promise(resolve => setTimeout(resolve, 1500));
+			
+		} catch (error: any) {
+			consecutiveFailures++;
+			logError(`Failed (${consecutiveFailures}/${maxFailures}): ${error.message}`);
+			
+			if (consecutiveFailures >= maxFailures) {
+				const allPeople = Array.from(existingPeople.values());
+				allPeople.sort((a, b) => a.birthYear - b.birthYear);
+				saveTempData(allPeople, category);
+				saveState(currentState, category);
+				logWarning(`\nStopped due to errors. Progress saved. Run again to continue.`);
+				return;
+			}
+			
+			await new Promise(resolve => setTimeout(resolve, 5000 * consecutiveFailures));
+		}
+	}
+	
+	const allPeople = Array.from(existingPeople.values());
+	allPeople.sort((a, b) => a.birthYear - b.birthYear);
+	saveTempData(allPeople, category);
+	saveState(currentState, category);
+	
+	const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+	logSuccess(`${categoryLabel}: ${allPeople.length.toLocaleString()} persons in ${totalTime}s`);
+}
+
 async function main() {
 	try {
-		const startTime = Date.now();
-		const testMode = process.argv.includes('--test') || process.argv.includes('-t');
+		// Parse command line args
+		const args = process.argv.slice(2);
+		const category = args.find(arg => arg.startsWith('--category='))?.split('=')[1] ||
+		                args.find(arg => arg === '--category') ? args[args.indexOf('--category') + 1] : undefined;
 		
-		logHeader('🚀 Incremental Wikidata Fetch for Norgeskart');
+		const merge = args.includes('--merge');
+		const listCategories = args.includes('--list') || args.includes('--categories');
 		
-		// Load existing state and data
-		const state = loadState();
-		const existingPeople = new Map<string, PersonData>();
+		if (listCategories) {
+			console.log('\n📋 Available categories:\n');
+			Object.keys(OCCUPATION_IDS).forEach(cat => {
+				console.log(`  • ${colors.cyan}${cat}${colors.reset}`);
+			});
+			console.log('\nUsage: npm run generate:data -- --category=<category>\n');
+			return;
+		}
 		
-		if (state) {
-			logInfo(`Resuming from previous session:`);
-			log(`  Last offset: ${state.lastOffset.toLocaleString()}`, colors.dim);
-			log(`  Total rows fetched: ${state.totalRowsFetched.toLocaleString()}`, colors.dim);
-			log(`  Processed persons: ${state.processedIds.size.toLocaleString()}`, colors.dim);
-			log(`  Last update: ${new Date(state.lastUpdate).toLocaleString()}`, colors.dim);
+		if (merge) {
+			logHeader('🔀 Merging All Category Data');
+			const allPeople = mergeAllCategoryData();
+			allPeople.sort((a, b) => a.birthYear - b.birthYear);
+			saveFinalData(allPeople);
 			
-			// Load existing temp data
-			const tempData = loadTempData();
-			tempData.forEach(p => existingPeople.set(p.id, p));
-			logSuccess(`Loaded ${tempData.length.toLocaleString()} existing persons from temp file\n`);
-		} else {
-			logInfo(`Starting fresh fetch session\n`);
+			const withImages = allPeople.filter(p => p.imageUrl).length;
+			logSuccess(`Merged ${allPeople.length.toLocaleString()} total persons`);
+			logInfo(`With images: ${withImages.toLocaleString()} (${((withImages / allPeople.length) * 100).toFixed(1)}%)`);
+			return;
 		}
 		
-		const currentState: FetchState = {
-			lastOffset: state?.lastOffset || 0,
-			processedIds: state?.processedIds || new Set(),
-			totalRowsFetched: state?.totalRowsFetched || 0,
-			lastUpdate: new Date().toISOString()
-		};
-		
-		let offset = currentState.lastOffset;
-		const limit = testMode ? 500 : CHUNK_SIZE;
-		const maxRows = testMode ? 5000 : 50000; // Increased for full mode
-		let consecutiveFailures = 0;
-		const maxFailures = 3;
-		let chunkCount = 0;
-		const saveInterval = 5; // Save every 5 chunks
-		
-		log(`${colors.cyan}Fetching in chunks of ${limit} rows (max ${maxRows} total)${colors.reset}\n`);
-		
-		while (offset < maxRows && consecutiveFailures < maxFailures) {
-			try {
-				const { rows, hasMore } = await queryWikidata(offset, limit, testMode);
-				
-				if (rows.length === 0) {
-					logWarning(`No more data at offset ${offset}`);
-					break;
-				}
-				
-				// Process rows and merge with existing
-				const newPeople = processRows(rows, existingPeople);
-				
-				// Add to existing map
-				newPeople.forEach(p => {
-					if (!existingPeople.has(p.id)) {
-						existingPeople.set(p.id, p);
-						currentState.processedIds.add(p.id);
-					}
-				});
-				
-				chunkCount++;
-				currentState.lastOffset = offset + rows.length;
-				currentState.totalRowsFetched += rows.length;
-				
-				log(`  ${colors.dim}📊 Progress: ${currentState.processedIds.size.toLocaleString()} unique persons from ${currentState.totalRowsFetched.toLocaleString()} rows${colors.reset}\n`);
-				
-				// Save progress periodically
-				if (chunkCount % saveInterval === 0 || !hasMore) {
-					const allPeople = Array.from(existingPeople.values());
-					allPeople.sort((a, b) => a.birthYear - b.birthYear);
-					
-					saveTempData(allPeople);
-					saveState(currentState);
-					
-					logSuccess(`Progress saved: ${allPeople.length.toLocaleString()} persons (offset: ${currentState.lastOffset})\n`);
-				}
-				
-				consecutiveFailures = 0; // Reset on success
-				offset += rows.length;
-				
-				if (!hasMore) {
-					logInfo('Reached end of data');
-					break;
-				}
-				
-				// Be nice to Wikidata servers
-				await new Promise(resolve => setTimeout(resolve, 1500));
-				
-			} catch (error: any) {
-				consecutiveFailures++;
-				logError(`Chunk failed (attempt ${consecutiveFailures}/${maxFailures}): ${error.message}`);
-				
-				if (consecutiveFailures >= maxFailures) {
-					logWarning(`\nToo many consecutive failures. Saving progress and stopping.`);
-					logWarning(`Run the script again to continue from offset ${offset}`);
-					break;
-				}
-				
-				const backoffTime = 5000 * consecutiveFailures;
-				logWarning(`Waiting ${backoffTime / 1000}s before retry...`);
-				await new Promise(resolve => setTimeout(resolve, backoffTime));
+		if (category) {
+			if (!OCCUPATION_IDS[category]) {
+				logError(`Unknown category: ${category}`);
+				logInfo(`Use --list to see available categories`);
+				process.exit(1);
 			}
-		}
-		
-		// Final save
-		const allPeople = Array.from(existingPeople.values());
-		allPeople.sort((a, b) => a.birthYear - b.birthYear);
-		
-		saveTempData(allPeople);
-		saveFinalData(allPeople);
-		saveState(currentState);
-		
-		const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-		const minYear = allPeople.length > 0 ? Math.min(...allPeople.map(p => p.birthYear)) : 0;
-		const maxYear = allPeople.length > 0 ? Math.max(...allPeople.map(p => p.birthYear)) : 0;
-		const withImages = allPeople.filter(p => p.imageUrl).length;
-		const withOccupations = allPeople.filter(p => p.occupations.length > 0).length;
-		const living = allPeople.filter(p => p.deathYear === null).length;
-		
-		console.log('\n' + '='.repeat(70));
-		if (consecutiveFailures >= maxFailures) {
-			log(`${colors.yellow}⚠ PARTIAL FETCH COMPLETE${colors.reset}`, colors.bright);
-			logWarning(`Process stopped due to errors. Run again to continue.`);
+			await fetchCategory(category);
 		} else {
-			log(`${colors.green}✓ FETCH COMPLETE${colors.reset}`, colors.bright);
-		}
-		console.log('='.repeat(70));
-		console.log(`\n${colors.cyan}${colors.bright}Statistics:${colors.reset}`);
-		console.log(`  ${colors.dim}⏱${colors.reset}  Time: ${colors.bright}${totalTime}s${colors.reset}`);
-		console.log(`  ${colors.dim}📁${colors.reset}  Output: ${colors.dim}${OUTPUT_FILE}${colors.reset}`);
-		console.log(`  ${colors.dim}💾${colors.reset}  Temp file: ${colors.dim}${TEMP_FILE}${colors.reset}`);
-		console.log(`  ${colors.dim}📍${colors.reset}  Next offset: ${colors.cyan}${currentState.lastOffset}${colors.reset}`);
-		console.log(`\n${colors.bright}📊 Dataset:${colors.reset}`);
-		console.log(`  ${colors.dim}👥${colors.reset}  Persons: ${colors.bright}${allPeople.length.toLocaleString()}${colors.reset}`);
-		console.log(`  ${colors.dim}📅${colors.reset}  Years: ${colors.cyan}${minYear}${colors.reset} ${colors.dim}–${colors.reset} ${colors.cyan}${maxYear}${colors.reset}`);
-		console.log(`  ${colors.dim}🖼${colors.reset}  With images: ${colors.green}${withImages.toLocaleString()}${colors.reset} ${colors.dim}(${allPeople.length > 0 ? ((withImages / allPeople.length) * 100).toFixed(1) : 0}%)${colors.reset}`);
-		console.log(`  ${colors.dim}💼${colors.reset}  With occupations: ${colors.green}${withOccupations.toLocaleString()}${colors.reset} ${colors.dim}(${allPeople.length > 0 ? ((withOccupations / allPeople.length) * 100).toFixed(1) : 0}%)${colors.reset}`);
-		console.log(`  ${colors.dim}❤️${colors.reset}  Living: ${colors.yellow}${living.toLocaleString()}${colors.reset} ${colors.dim}(${allPeople.length > 0 ? ((living / allPeople.length) * 100).toFixed(1) : 0}%)${colors.reset}`);
-		console.log('\n' + '='.repeat(70) + '\n');
-		
-		if (consecutiveFailures >= maxFailures) {
-			logInfo(`💡 Tip: Run the script again to continue from where it stopped`);
-			process.exit(0); // Exit gracefully
+			// Fetch all (general query) - pass undefined to indicate no category filter
+			logHeader('🌍 Fetching All Notable Norwegians');
+			logWarning('This may be slow. Consider using --category=<category> for faster results.');
+			logInfo('Use --list to see available categories\n');
+			await fetchCategory(undefined);
 		}
 		
 	} catch (error) {

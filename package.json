@@ -9,7 +9,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "generate:data": "tsx src/lib/data/fetchPeople.ts",
-    "generate:data:test": "tsx src/lib/data/fetchPeople.ts --test"
+    "generate:data:list": "tsx src/lib/data/fetchPeople.ts --list",
+    "generate:data:merge": "tsx src/lib/data/fetchPeople.ts --merge"
   },
   "devDependencies": {
     "@sveltejs/adapter-auto": "^3.0.0",
