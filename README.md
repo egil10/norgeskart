@@ -1,4 +1,7 @@
-# Norgeskart - Norske Historiske Personer
+# Norgeskart
+
+🔗 **Live Demo:** [https://norgeskart-two.vercel.app/](https://norgeskart-two.vercel.app/)
+ - Norske Historiske Personer
 
 A beautiful, interactive timeline visualization of Norwegian historical persons built with SvelteKit and D3.js.
 

@@ -10,7 +10,7 @@
     let container: HTMLDivElement;
     let gElement: SVGGElement;
     let width = 0;
-    let height = 0;
+    let height = 0; // Viewport height
     const currentYear = 2025;
 
     const MIN_YEAR = 800;
@@ -31,14 +31,33 @@
         const maxK = 20;
         const clamped = Math.max(minK, Math.min(maxK, zoomScale));
         const ratio = (clamped - minK) / (maxK - minK);
-        return Math.round(70 - ratio * 69);
+        // At zoom 1, threshold 80. At zoom 20, threshold 0.
+        return Math.round(80 - ratio * 80);
     }
 
-    function getVisiblePeople(people: Person[], zoomScale: number): Person[] {
-        if (people.length === 0) return [];
+    function getVisiblePeople(
+        people: Person[],
+        zoomTransform: d3.ZoomTransform,
+        width: number,
+    ): Person[] {
+        if (people.length === 0 || !baseXScale) return [];
 
+        const zoomScale = zoomTransform.k;
         const threshold = getProminenceThreshold(zoomScale);
-        const filtered = people.filter((p) => p.prominenceScore >= threshold);
+
+        // 1. Filter by prominence
+        let filtered = people.filter((p) => p.prominenceScore >= threshold);
+
+        // 2. Filter by Time Range (Visible Domain)
+        const currentXScale = zoomTransform.rescaleX(baseXScale);
+        const [minYear, maxYear] = currentXScale.domain();
+
+        filtered = filtered.filter((p) => {
+            const birth = p.birthYear;
+            const death = p.deathYear || currentYear;
+            // Check strict overlap with buffer
+            return death >= minYear - 50 && birth <= maxYear + 50;
+        });
 
         const sorted = [...filtered].sort((a, b) => {
             if (b.prominenceScore !== a.prominenceScore) {
@@ -47,19 +66,18 @@
             return a.birthYear - b.birthYear;
         });
 
-        const maxRows = Math.floor(
-            (height - margin.top - margin.bottom) / ROW_HEIGHT,
-        );
-        return sorted.slice(0, Math.max(10, maxRows));
+        // No more slicing! We show everyone who fits the criteria.
+        return sorted;
     }
 
     function updateDimensions() {
         if (!container || typeof window === "undefined") return;
         width = container.clientWidth;
-        height = container.clientHeight || window.innerHeight - 200;
+        height = container.clientHeight; // This is the viewport height
 
         if (svg && width > 0 && height > 0) {
-            d3.select(svg).attr("width", width).attr("height", height);
+            d3.select(svg).attr("width", width);
+            // Height will be set in render() based on content
 
             if (baseXScale) {
                 baseXScale.range([margin.left, width - margin.right]);
@@ -83,11 +101,18 @@
 
         zoom = d3
             .zoom<SVGSVGElement, unknown>()
-            .scaleExtent([1, 20])
+            .scaleExtent([1, 50]) // Allow deep zoom
             .translateExtent([
                 [margin.left - 200, -Infinity],
                 [width - margin.right + 200, Infinity],
             ])
+            .filter((event) => {
+                // Ctrl+Wheel to zoom, otherwise Wheel scrolls
+                if (event.type === "wheel") {
+                    return event.ctrlKey || event.metaKey;
+                }
+                return true;
+            })
             .on("zoom", (event) => {
                 zoomTransform = event.transform;
                 render();
@@ -102,14 +127,20 @@
             !gElement ||
             !baseXScale ||
             width === 0 ||
-            height === 0 ||
             people.length === 0
         )
             return;
 
         const xScale = zoomTransform.rescaleX(baseXScale);
-        const zoomScale = zoomTransform.k;
-        const visiblePeople = getVisiblePeople(people, zoomScale);
+        const visiblePeople = getVisiblePeople(people, zoomTransform, width);
+
+        // Calculate needed height
+        const contentHeight =
+            visiblePeople.length * ROW_HEIGHT + margin.top + margin.bottom;
+        const actualHeight = Math.max(height, contentHeight);
+
+        // Resize SVG to fit content
+        d3.select(svg).attr("height", actualHeight);
 
         // Grid lines
         const gridData = d3.range(
@@ -133,7 +164,7 @@
             .attr("x1", (d) => xScale(d))
             .attr("x2", (d) => xScale(d))
             .attr("y1", margin.top)
-            .attr("y2", height - margin.bottom)
+            .attr("y2", actualHeight - margin.bottom)
             .attr("stroke", "#e5e7eb")
             .attr("stroke-width", 1)
             .attr("opacity", 0.5);
@@ -143,7 +174,7 @@
             .selectAll(".person-row")
             .data(visiblePeople, (d) => d.id);
 
-        rows.exit().remove(); // Remove without transition for better performance
+        rows.exit().remove();
 
         const rowsEnter = rows.enter().append("g").attr("class", "person-row");
 
@@ -214,7 +245,11 @@
                 return "";
             });
 
-        // X-axis
+        // X-axis (Draw at bottom of VIEWPORT or CONTENT?)
+        // If content is huge, axis at bottom of content is invisible.
+        // For now, let's keep it consistent: Bottom of content area, so users can see "Where does it end?"
+        // But users prefer axis at top or fixed?
+        // Let's stick with bottom of SVG for simplicity in V1. Use actualHeight.
         let xAxisG = g.select(".x-axis");
         if (xAxisG.empty()) {
             xAxisG = g.append("g").attr("class", "x-axis axis");
@@ -226,7 +261,7 @@
             .ticks(Math.min(20, Math.floor(width / 80)));
 
         xAxisG
-            .attr("transform", `translate(0, ${height - margin.bottom})`)
+            .attr("transform", `translate(0, ${actualHeight - margin.bottom})`)
             .call(xAxis as any)
             .selectAll("text")
             .attr("fill", "#000")
@@ -239,7 +274,7 @@
 
     function zoomIn() {
         if (!svg) return;
-        const newK = Math.min(20, zoomTransform.k * 1.5);
+        const newK = Math.min(50, zoomTransform.k * 1.5);
         d3.select(svg)
             .transition()
             .duration(200)
@@ -286,7 +321,7 @@
 
             setTimeout(() => {
                 updateDimensions();
-                if (g && baseXScale && width > 0 && height > 0) {
+                if (g && baseXScale && width > 0) {
                     render();
                 }
             }, 100);
@@ -303,7 +338,9 @@
 </script>
 
 <div class="timeline-wrapper" bind:this={container}>
-    <svg bind:this={svg}>
+    <div class="help-text">Use <b>Ctrl + Scroll</b> to zoom</div>
+    <svg bind:this={svg} class:grabbing={false}>
+        <!-- grabbing removed, managed by d3 -->
         <g bind:this={gElement}></g>
     </svg>
 
@@ -357,8 +394,7 @@
     <!-- Info badge -->
     <div class="info-badge">
         <p class="info-text">
-            {getVisiblePeople(people, zoomTransform.k).length} of {people.length}
-            people
+            {getVisiblePeople(people, zoomTransform, width).length} visible
         </p>
         <p class="info-text zoom-level">
             Zoom: {Math.round(zoomTransform.k * 10) / 10}x
@@ -372,24 +408,38 @@
         height: 100%;
         position: relative;
         background: #faf9f6;
-        overflow: hidden;
+        /* Enable vertical scrolling */
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .help-text {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.9);
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 12px;
+        color: #666;
+        border: 1px solid #ddd;
+        pointer-events: none;
+        z-index: 20;
     }
 
     svg {
         width: 100%;
-        height: 100%;
-        cursor: grab;
+        /* Height handled by d3 */
         display: block;
-    }
-
-    svg:active {
-        cursor: grabbing;
+        /* Remove grab cursor since we prioritize scroll */
+        /* cursor: grab; */
     }
 
     .zoom-controls {
-        position: absolute;
+        position: fixed; /* Fixed so it stays in view when scrolling */
         right: 16px;
-        top: 16px;
+        top: 80px; /* Below header */
         display: flex;
         flex-direction: column;
         gap: 4px;
@@ -409,6 +459,7 @@
         color: #000;
         transition: all 0.15s;
         padding: 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
 
     .zoom-btn:hover {
@@ -416,19 +467,16 @@
         border-color: #d1d5db;
     }
 
-    .zoom-btn:active {
-        background: #e5e7eb;
-    }
-
     .info-badge {
-        position: absolute;
+        position: fixed; /* Fixed so it stays in view when scrolling */
         left: 16px;
-        top: 16px;
+        bottom: 16px; /* Moved to bottom left so it doesn't conflict with top */
         background: white;
         padding: 8px 12px;
         border-radius: 4px;
         border: 1px solid #e5e7eb;
         z-index: 10;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
 
     .info-text {
