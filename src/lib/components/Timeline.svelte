@@ -2,81 +2,123 @@
     import { onMount, onDestroy } from "svelte";
     import * as d3 from "d3";
     import type { Person } from "../types";
+    import { palette } from "../theme/palette";
 
-    export let people: Person[] = [];
-    export let onPersonClick: (person: Person) => void = () => {};
-
-    // Elements
-    let viewport: HTMLDivElement;
-    let mainSvg: SVGSVGElement;
-    let mainGElement: SVGGElement;
-
-    let axisContainer: HTMLDivElement;
-    let axisSvg: SVGSVGElement;
-    let axisGElement: SVGGElement;
-
-    // Dimensions
-    let width = 0;
-    let height = 0; // Viewport height
+    const MIN_YEAR = 700;
+    const MAX_YEAR = 2100;
+    const ROW_HEIGHT = 90; // Fit approx 6 rows in 500-600px
+    const BAR_HEIGHT = 50; // Taller bars
     const AXIS_HEIGHT = 40;
     const currentYear = 2025;
 
-    const MIN_YEAR = 700;
-    const MAX_YEAR = 2026;
-    const ROW_HEIGHT = 24; // Compact height
-    const BAR_HEIGHT = 18;
     // Split margins
     const margin = { top: 20, right: 80, bottom: 20, left: 150 }; // For main content
     const axisMargin = { top: 0, right: 80, bottom: 0, left: 150 }; // For axis
 
-    let baseXScale: d3.ScaleLinear<number, number>;
-    let zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
+    export let people: Person[] = [];
+    export let onPersonClick: (p: Person) => void = () => {};
 
-    // Selections
-    let mainG: d3.Selection<SVGGElement, unknown, null, undefined> | null =
-        null;
-    let axisG: d3.Selection<SVGGElement, unknown, null, undefined> | null =
-        null;
+    // Elements
+    let mainSvg: SVGSVGElement;
+    let mainGElement: SVGGElement;
+    let axisSvg: SVGSVGElement;
+    let axisGElement: SVGGElement;
+    let axisContainer: HTMLDivElement;
+    let viewport: HTMLDivElement;
+
+    // Dimensions
+    let width = 0;
+    let height = 0; // Viewport height
+    let scrollTop = 0; // Virtualization scroll position
+
+    let zoom: any;
+    let mainG: d3.Selection<SVGGElement, unknown, null, undefined>;
+    let axisG: d3.Selection<SVGGElement, unknown, null, undefined>;
+    let baseXScale: d3.ScaleLinear<number, number>;
 
     let zoomTransform: d3.ZoomTransform = d3.zoomIdentity;
     let hoveredPerson: Person | null = null;
+
+    // Theme
+    // Helper to get color based on ID hashing
+    function getPersonColor(id: string): string {
+        const colors = palette.light; // Always Light Mode
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+            hash = id.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const hue = Math.abs(hash % 360);
+        return `hsl(${hue}, 70%, 45%)`; // Slightly darker for lines
+    }
+
+    function handleScroll(e: Event) {
+        const target = e.target as HTMLDivElement;
+        scrollTop = target.scrollTop;
+        requestAnimationFrame(() => render());
+    }
+
+    onMount(() => {
+        if (!people || people.length === 0) return;
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.target === viewport) {
+                    width = entry.contentRect.width;
+                    height = entry.contentRect.height;
+                }
+            }
+            initializeZoom();
+            render();
+        });
+
+        resizeObserver.observe(viewport);
+
+        // Listen to scroll
+        viewport.addEventListener("scroll", handleScroll);
+
+        return () => {
+            resizeObserver.disconnect();
+            viewport?.removeEventListener("scroll", handleScroll);
+        };
+    });
 
     function getProminenceThreshold(zoomScale: number): number {
         const minK = 1;
         const maxK = 20;
         const clamped = Math.max(minK, Math.min(maxK, zoomScale));
         const ratio = (clamped - minK) / (maxK - minK);
-        // Start strict (80) go to lenient (0)
         return Math.round(80 - ratio * 80);
+    }
+
+    function getEffectiveDeathYear(p: Person): number {
+        if (p.deathYear) return p.deathYear;
+        if (p.birthYear < 1915) {
+            return p.birthYear + 80;
+        }
+        return currentYear;
     }
 
     function packLanes(
         people: Person[],
         xScale: d3.ScaleLinear<number, number>,
     ): (Person & { laneIndex: number })[] {
-        const lanes: number[] = []; // stores pixel end position of the last person in each lane
+        const lanes: number[] = [];
         const packed: (Person & { laneIndex: number })[] = [];
-        const minPixelGap = 15; // Minimum gap between names
 
-        // Sort by birth year to ensure linear placement
+        // Tighter packing: Gap equal to ~2 years or just 5px
+        // Let's use 5px constant gap for density
+        const minPixelGap = 5;
+
         const sorted = [...people].sort((a, b) => a.birthYear - b.birthYear);
 
         for (const p of sorted) {
             const birthX = xScale(p.birthYear);
-            const deathX = xScale(p.deathYear || currentYear);
-            const labelWidthEstimate = p.name.length * 7 + 20; // Rough calc for label width
-            // The item effectively ends at the visual scale end OR the label end, whichever is further
-            // But sticky labels mean label stays visible.
-            // Simplified: we just care about segment overlap + a simplified gap for now.
-            // User said: "one segment stopping before the next".
-
-            // Let's use simple segment end for packing, we can refine for labels later if needed.
-            // Actually, if we want to avoid text overlap, we should consider it, but let's start with strict segment packing.
+            const deathX = xScale(getEffectiveDeathYear(p));
+            // Add width of text? rough estimate
+            // For now, strict bar width + gap
             const endX = deathX + minPixelGap;
 
             let placed = false;
-
-            // Try to fit in existing lanes
             for (let i = 0; i < lanes.length; i++) {
                 if (lanes[i] <= birthX) {
                     lanes[i] = endX;
@@ -86,7 +128,6 @@
                 }
             }
 
-            // If not placed, create new lane
             if (!placed) {
                 lanes.push(endX);
                 packed.push({ ...p, laneIndex: lanes.length - 1 });
@@ -106,33 +147,21 @@
         const currentXScale = zoomTransform.rescaleX(baseXScale);
         const [minYear, maxYear] = currentXScale.domain();
 
-        // 1. Filter by Time Range (Visible Domain) with buffer
+        const yearWidth = maxYear - minYear;
+        const buffer = yearWidth * 1.5;
+
         let candidates = people.filter((p) => {
             const birth = p.birthYear;
-            const death = p.deathYear || currentYear;
-            return death >= minYear - 50 && birth <= maxYear + 50;
+            const death = getEffectiveDeathYear(p);
+            return death >= minYear - buffer && birth <= maxYear + buffer;
         });
 
-        // 2. Filter by Prominence (Dynamic)
-        // Since we pack lanes, we can afford to show more people.
-        // We lower the threshold slightly to allow density filling.
         const zoomScale = zoomTransform.k;
-        const threshold = getProminenceThreshold(zoomScale) * 0.7; // 30% more lenient
+        const threshold = getProminenceThreshold(zoomScale) * 0.7;
 
         candidates = candidates.filter((p) => p.prominenceScore >= threshold);
 
-        // 3. Pack into lanes
-        // This assigns laneIndex to everyone based on their time
-        const packed = packLanes(candidates, currentXScale);
-
-        // 4. Limit to Viewport Height
-        const maxRows = Math.floor(
-            (height - margin.top - margin.bottom) / ROW_HEIGHT,
-        );
-
-        // Return only those who fit in the visible lanes
-        // We sort by laneIndex to render top-down
-        return packed.filter((p) => p.laneIndex < maxRows);
+        return packLanes(candidates, currentXScale);
     }
 
     function updateDimensions() {
@@ -142,7 +171,7 @@
         height = viewport.clientHeight;
 
         if (mainSvg && width > 0 && height > 0) {
-            d3.select(mainSvg).attr("width", width).attr("height", height); // Fixed height to viewport
+            d3.select(mainSvg).attr("width", width).attr("height", height);
 
             if (baseXScale) {
                 baseXScale.range([margin.left, width - margin.right]);
@@ -175,7 +204,10 @@
                 [margin.left - 500, -Infinity],
                 [width - margin.right + 500, Infinity],
             ])
-            // No filter! Wheel = Zoom.
+            .filter((event) => {
+                // Disable wheel to allow native scrolling
+                return event.type !== "wheel";
+            })
             .on("zoom", (event) => {
                 zoomTransform = event.transform;
                 render();
@@ -194,18 +226,57 @@
         )
             return;
 
+        const colors = palette.light; // Always Light Mode
+
         const xScale = zoomTransform.rescaleX(baseXScale);
 
-        // ----- MAIN CONTENT RENDER -----
-
-        const visiblePeople = getVisiblePeople(
+        const visiblePeopleAll = getVisiblePeople(
             people,
             zoomTransform,
             width,
             height,
         );
 
-        // Grid lines (in Main only)
+        // Calculate Dynamic Height based on content
+        const maxLane =
+            visiblePeopleAll.length > 0
+                ? Math.max(...visiblePeopleAll.map((p) => p.laneIndex))
+                : 0;
+        const totalContentHeight =
+            (maxLane + 1) * ROW_HEIGHT + margin.top + margin.bottom;
+        // Ensure at least viewport height
+        const renderHeight = Math.max(height, totalContentHeight);
+
+        d3.select(mainSvg).attr("height", renderHeight);
+
+        // --- VIRTUALIZATION ---
+        // Calc visible row range
+        const buffer = 2; // Extra rows top/bottom
+        const startRow = Math.max(
+            0,
+            Math.floor((scrollTop - margin.top) / ROW_HEIGHT) - buffer,
+        );
+        const endRow = Math.min(
+            maxLane + 1,
+            Math.ceil((scrollTop + height - margin.top) / ROW_HEIGHT) + buffer,
+        );
+
+        // Filter for virtualization AND min-width
+        const MIN_SEGMENT_WIDTH = 5;
+
+        const visiblePeople = visiblePeopleAll.filter((p) => {
+            // Virtualization check
+            if (p.laneIndex < startRow || p.laneIndex > endRow) return false;
+
+            // Min Width Check
+            const startX = xScale(p.birthYear);
+            const endX = xScale(getEffectiveDeathYear(p));
+            const w = endX - startX;
+
+            return w >= MIN_SEGMENT_WIDTH;
+        });
+
+        // Grid lines
         const gridData = d3.range(
             Math.ceil(MIN_YEAR / 100) * 100,
             MAX_YEAR + 1,
@@ -224,11 +295,11 @@
 
         gridEnter
             .merge(gridLines as any)
-            .attr("x1", (d) => xScale(d))
-            .attr("x2", (d) => xScale(d))
+            .attr("x1", (d: any) => xScale(d))
+            .attr("x2", (d: any) => xScale(d))
             .attr("y1", 0) // Full height
-            .attr("y2", height)
-            .attr("stroke", "#e5e7eb")
+            .attr("y2", renderHeight)
+            .attr("stroke", colors.border)
             .attr("stroke-width", 1)
             .attr("opacity", 0.5);
 
@@ -241,119 +312,79 @@
         const rowsEnter = rows.enter().append("g").attr("class", "person-row");
         const rowsMerged = rowsEnter.merge(rows as any);
 
-        rowsMerged.attr("transform", (d) => {
+        rowsMerged.attr("transform", (d: any) => {
             const y = margin.top + d.laneIndex * ROW_HEIGHT;
             return `translate(0, ${y})`;
         });
 
-        // Lifespan bars
-        const bars = rowsMerged.selectAll(".lifespan-bar").data((d) => [d]);
+        // Lifespan Lines (The "Line" aesthetic)
+        const groups = rowsMerged.selectAll(".person-group").data((d) => [d]);
+        groups.exit().remove();
 
-        const barWidthFn = (d: Person) => {
-            const endYear = d.deathYear || currentYear;
-            return Math.max(0, xScale(endYear) - xScale(d.birthYear));
-        };
+        const groupsEnter = groups
+            .enter()
+            .append("g")
+            .attr("class", "person-group");
+        const groupsMerged = groupsEnter.merge(groups as any);
 
-        bars.enter()
-            .append("rect")
-            .attr("class", "lifespan-bar")
-            .merge(bars as any)
-            .attr("x", (d) => xScale(d.birthYear))
-            .attr("y", 0)
-            .attr("width", barWidthFn)
-            .attr("height", BAR_HEIGHT)
-            .attr("fill", (d) => d.color)
-            .attr("stroke", "#000")
-            .attr("stroke-width", 1)
-            .attr("rx", 2)
+        groupsMerged
             .attr("cursor", "pointer")
             .on("click", (event, d) => {
                 event.stopPropagation();
-                onPersonClick(d);
+                onPersonClick(d as Person);
             })
             .on("mouseenter", (event, d) => {
-                hoveredPerson = d;
-                d3.select(event.currentTarget).attr("stroke-width", 2);
+                hoveredPerson = d as Person;
+                d3.select(event.currentTarget)
+                    .select("line")
+                    .attr("stroke-width", 6);
             })
             .on("mouseleave", (event) => {
                 hoveredPerson = null;
-                d3.select(event.currentTarget).attr("stroke-width", 1);
+                d3.select(event.currentTarget)
+                    .select("line")
+                    .attr("stroke-width", 4);
             });
 
-        // Clip Paths (strictly contain text)
-        const clips = rowsMerged.selectAll(".bar-clip").data((d) => [d]);
-        const clipsEnter = clips
+        // 1. The Line
+        const lines = groupsMerged.selectAll("line").data((d) => [d]);
+        lines
             .enter()
-            .append("defs")
-            .append("clipPath")
-            .attr("class", "bar-clip")
-            .attr("id", (d) => `clip-${d.id}`);
-        clipsEnter.append("rect");
+            .append("line")
+            .merge(lines as any)
+            .attr("x1", (d: any) => xScale(d.birthYear))
+            .attr("x2", (d: any) => xScale(getEffectiveDeathYear(d)))
+            .attr("y1", BAR_HEIGHT / 2)
+            .attr("y2", BAR_HEIGHT / 2)
+            .attr("stroke", (d: any) => getPersonColor(d.id))
+            .attr("stroke-width", 4)
+            .attr("stroke-linecap", "square");
 
-        clips
-            .merge(
-                clipsEnter.select(function () {
-                    return this.parentNode;
-                }) as any,
-            )
-            .select("clipPath")
-            .attr("id", (d) => `clip-${d.id}`)
-            .select("rect")
-            .attr("x", (d) => xScale(d.birthYear))
-            .attr("y", 0)
-            .attr("width", barWidthFn)
-            .attr("height", BAR_HEIGHT);
-
-        // Labels
-        const labels = rowsMerged.selectAll(".bar-label").data((d) => [d]);
-
+        // 2. The Text (Centered)
+        const labels = groupsMerged.selectAll("text").data((d) => [d]);
         labels
             .enter()
             .append("text")
-            .attr("class", "bar-label")
             .merge(labels as any)
-            .attr("y", BAR_HEIGHT / 2 + 4)
-            .attr("fill", "#000")
-            .attr("font-size", "11px")
-            .attr("font-weight", "500")
+            .attr("x", (d: any) => {
+                const start = xScale(d.birthYear);
+                const end = xScale(getEffectiveDeathYear(d));
+                return start + (end - start) / 2; // Center
+            })
+            .attr("y", BAR_HEIGHT / 2 + 5) // Vertically centered
+            .attr("text-anchor", "middle")
+            .attr("fill", "black")
+            .attr("font-size", "12px")
+            .attr("font-weight", "bold")
             .attr("font-family", "system-ui, sans-serif")
-            .attr("pointer-events", "none")
-            .attr("clip-path", (d) => `url(#clip-${d.id})`)
-            .each(function (d) {
-                // STICKY LABEL LOGIC
-                const startX = xScale(d.birthYear);
-                const endX = xScale(d.deathYear || currentYear);
-                const barWidth = endX - startX;
-
-                // Sticky X: clamp to 0 (left edge), but offset by 6px padding
-                // AND ensure we don't push past the end of the bar
-                const stickyX = Math.max(startX, 0) + 6;
-                d3.select(this).attr("x", stickyX);
-
-                // Calculate space available for text from sticky start to end of bar
-                const available = endX - stickyX - 6;
-
-                if (available < 20) {
-                    d3.select(this).text("");
-                    return;
-                }
-
-                let text = d.name;
-                const charWidth = 7;
-                const maxChars = Math.floor(available / charWidth);
-
-                // Show dates if bar is wide enough relative to screen
-                if (barWidth > 160 && available > 100) {
-                    const longText = `${d.name} (${d.birthYear}–${d.deathYear || "present"})`;
-                    if (longText.length * charWidth < available) {
-                        text = longText;
-                    }
-                }
-
-                if (text.length > maxChars) {
-                    text = text.slice(0, Math.max(0, maxChars - 2)) + "...";
-                }
-                d3.select(this).text(text);
+            .attr("paint-order", "stroke")
+            .attr("stroke", "white") // Halo
+            .attr("stroke-width", 3)
+            .attr("stroke-linejoin", "round")
+            .text((d: any) => {
+                const death =
+                    d.deathYear || (d.birthYear < 1920 ? "?" : "pres");
+                return `${d.name.toUpperCase()} (${d.birthYear}-${death})`;
             });
 
         // ----- AXIS RENDER -----
@@ -372,38 +403,52 @@
             .attr("transform", `translate(0, 10)`)
             .call(xAxis as any)
             .selectAll("text")
-            .attr("fill", "#000")
+            .attr("fill", colors.text)
             .attr("font-size", "11px")
             .attr("font-weight", "400");
 
-        xAxisG.select(".domain").attr("stroke", "#000").attr("stroke-width", 1);
-        xAxisG.selectAll(".tick line").attr("stroke", "#000");
+        xAxisG
+            .select(".domain")
+            .attr("stroke", colors.text)
+            .attr("stroke-width", 1);
+        xAxisG
+            .selectAll(".tick line")
+            .attr("stroke", colors.text)
+            .attr("opacity", 0.3);
     }
 
-    function zoomIn() {
-        if (!mainSvg) return;
-        const newK = Math.min(200, zoomTransform.k * 1.5);
-        d3.select(mainSvg)
-            .transition()
-            .duration(200)
-            .call(zoom.scaleTo as any, newK);
+    function handleZoomIn() {
+        if (!mainSvg || !zoom) return;
+        d3.select(mainSvg).transition().duration(500).call(zoom.scaleBy, 1.5);
     }
 
-    function zoomOut() {
-        if (!mainSvg) return;
-        const newK = Math.max(1, zoomTransform.k / 1.5);
-        d3.select(mainSvg)
-            .transition()
-            .duration(200)
-            .call(zoom.scaleTo as any, newK);
+    function handleZoomOut() {
+        if (!mainSvg || !zoom) return;
+        d3.select(mainSvg).transition().duration(500).call(zoom.scaleBy, 0.66);
     }
 
-    function resetZoom() {
-        if (!mainSvg) return;
+    function scrollLeft() {
+        if (!mainSvg || !zoom) return;
         d3.select(mainSvg)
             .transition()
             .duration(500)
-            .call(zoom.transform as any, d3.zoomIdentity);
+            .call(zoom.translateBy, 300, 0);
+    }
+
+    function scrollRight() {
+        if (!mainSvg || !zoom) return;
+        d3.select(mainSvg)
+            .transition()
+            .duration(500)
+            .call(zoom.translateBy, -300, 0);
+    }
+
+    function resetZoom() {
+        if (!mainSvg || !zoom || !baseXScale) return;
+        d3.select(mainSvg)
+            .transition()
+            .duration(750)
+            .call(zoom.transform, d3.zoomIdentity);
     }
 
     onMount(() => {
@@ -446,8 +491,17 @@
 
 <div class="timeline-app">
     <div class="main-viewport" bind:this={viewport}>
-        <div class="help-text">
-            <b>Scroll</b> to zoom in/out • <b>Drag</b> to pan
+        <!-- Controls -->
+        <div class="controls">
+            <!-- Reverted to simple +/- buttons -->
+            <div class="btn-group">
+                <button on:click={handleZoomIn} aria-label="Zoom In">+</button>
+                <button on:click={handleZoomOut} aria-label="Zoom Out">-</button
+                >
+            </div>
+            <button class="reset-btn" on:click={resetZoom} title="Reset Zoom"
+                >⟲</button
+            >
         </div>
         <svg bind:this={mainSvg}>
             <g bind:this={mainGElement}></g>
@@ -459,60 +513,6 @@
         <svg bind:this={axisSvg} height={AXIS_HEIGHT}>
             <g bind:this={axisGElement}></g>
         </svg>
-    </div>
-
-    <!-- Zoom controls (Absolute to timeline-app) -->
-    <div class="zoom-controls">
-        <button class="zoom-btn" on:click={zoomIn} title="Zoom in">
-            <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-                <line x1="11" x2="11" y1="8" y2="14"></line>
-                <line x1="8" x2="14" y1="11" y2="11"></line>
-            </svg>
-        </button>
-        <button class="zoom-btn" on:click={zoomOut} title="Zoom out">
-            <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-                <line x1="8" x2="14" y1="11" y2="11"></line>
-            </svg>
-        </button>
-        <div class="divider"></div>
-        <button class="zoom-btn" on:click={resetZoom} title="Reset View">
-            <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
-                ></path>
-                <path d="M3 3v5h5"></path>
-            </svg>
-        </button>
     </div>
 
     <!-- Info badge -->
@@ -536,13 +536,32 @@
         position: relative;
         background: #faf9f6;
         overflow: hidden;
+        transition: background-color 0.3s ease;
     }
 
     .main-viewport {
         flex: 1;
-        overflow: hidden; /* No scrollbars! */
+        overflow-y: auto; /* Enable Vertical Scroll */
+        overflow-x: hidden;
         position: relative;
-        cursor: grab;
+    }
+
+    /* Modern Scrollbar */
+    .main-viewport::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    .main-viewport::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .main-viewport::-webkit-scrollbar-thumb {
+        background-color: rgba(0, 0, 0, 0.2);
+        border-radius: 5px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+    .main-viewport::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(0, 0, 0, 0.3);
     }
 
     .main-viewport:active {
@@ -555,64 +574,13 @@
         background: #faf9f6;
         border-top: 1px solid #e5e7eb;
         z-index: 5;
-    }
-
-    .help-text {
-        position: absolute;
-        top: 16px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(255, 255, 255, 0.9);
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-size: 12px;
-        color: #666;
-        border: 1px solid #ddd;
-        pointer-events: none;
-        z-index: 20;
-        width: fit-content;
-        margin: 0 auto;
+        transition:
+            background-color 0.3s ease,
+            border-color 0.3s ease;
     }
 
     svg {
         display: block;
-    }
-
-    .zoom-controls {
-        position: absolute;
-        right: 16px;
-        top: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        z-index: 30; /* Higher than axis */
-    }
-
-    .divider {
-        height: 1px;
-        background: #e5e7eb;
-        margin: 2px 4px;
-    }
-
-    .zoom-btn {
-        width: 36px;
-        height: 36px;
-        background: white;
-        border: 1px solid #e5e7eb;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        color: #000;
-        transition: all 0.15s;
-        padding: 0;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-    }
-
-    .zoom-btn:hover {
-        background: #f3f4f6;
-        border-color: #d1d5db;
     }
 
     .info-badge {
@@ -647,5 +615,69 @@
     }
     :global(.lifespan-bar:hover) {
         filter: brightness(0.95);
+    }
+    .controls {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 100;
+        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+    }
+
+    .btn-group {
+        display: flex;
+        flex-direction: column; /* Stack vertically like Maps */
+        gap: 0;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    button {
+        width: 36px;
+        height: 36px;
+        border: none;
+        background: white;
+        font-size: 18px;
+        cursor: pointer;
+        color: #555;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    button:last-child {
+        border-bottom: none;
+    }
+
+    button:hover {
+        background: #f9f9f9;
+        color: #000;
+    }
+
+    .reset-btn {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        font-size: 16px;
+        font-weight: bold;
+        border-radius: 4px; /* Separate square */
+        background: white;
+        border: 1px solid #ccc;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #555;
+    }
+
+    .reset-btn:hover {
+        background: #f9f9f9;
+        color: #000;
     }
 </style>

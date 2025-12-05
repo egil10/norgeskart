@@ -36,6 +36,8 @@
             window.removeEventListener("keydown", handleKeyDown);
         }
     });
+
+    // Theme - LIGHT MODE ONLY
 </script>
 
 <div class="app-container">
@@ -71,7 +73,10 @@
             <div class="footer-text">
                 <p>Norwegian Historical Figures • Data from Wikidata</p>
             </div>
-            <div class="footer-links">
+            <div
+                class="footer-links"
+                style="display: flex; gap: 12px; align-items: center;"
+            >
                 <a
                     href="https://github.com/egil10/norgeskart"
                     target="_blank"

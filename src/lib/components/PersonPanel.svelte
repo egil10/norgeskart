@@ -19,7 +19,7 @@
 
 	$: currentYear = new Date().getFullYear();
 	$: lifespan = person
-		? `${person.birthYear}–${person.deathYear || "present"}`
+		? `${person.birthYear}–${person.deathYear || (person.birthYear < 1920 ? "?" : "present")}`
 		: "";
 	$: age = person
 		? person.deathYear
