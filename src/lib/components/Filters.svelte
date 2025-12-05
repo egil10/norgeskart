@@ -7,12 +7,25 @@
 	export let onFiltered: (filtered: Person[]) => void = () => {};
 
 	let selectedOccupations: Set<string> = new Set(allOccupations);
-	let yearRange: [number, number] = [1800, 2025];
+	let yearRange: [number, number] = [800, new Date().getFullYear()];
 	let searchQuery: string = '';
+	let onlyLiving = false;
+	let onlyWithImages = false;
 	let filteredCount = people.length;
 
-	const minYear = 1800;
-	const maxYear = 2025;
+	let minYear = 800;
+	let maxYear = new Date().getFullYear();
+
+	// Calculate dynamic year range from data
+	$: {
+		if (people.length > 0) {
+			const years = people.map(p => p.birthYear);
+			minYear = Math.min(...years);
+			maxYear = Math.max(...years, new Date().getFullYear());
+			if (yearRange[0] < minYear) yearRange = [minYear, yearRange[1]];
+			if (yearRange[1] > maxYear) yearRange = [yearRange[0], maxYear];
+		}
+	}
 
 	$: {
 		// Filter by occupation
@@ -40,8 +53,19 @@
 			const query = searchQuery.toLowerCase().trim();
 			result = result.filter((person) =>
 				person.name.toLowerCase().includes(query) ||
-				person.occupations.some(occ => occ.toLowerCase().includes(query))
+				person.occupations.some(occ => occ.toLowerCase().includes(query)) ||
+				person.summary.toLowerCase().includes(query)
 			);
+		}
+
+		// Filter by living status
+		if (onlyLiving) {
+			result = result.filter((person) => person.deathYear === null);
+		}
+
+		// Filter by image availability
+		if (onlyWithImages) {
+			result = result.filter((person) => person.imageUrl !== null);
 		}
 
 		filteredCount = result.length;
@@ -70,8 +94,17 @@
 		artist: 'Kunstner',
 		writer: 'Forfatter',
 		politician: 'Politiker',
+		scientist: 'Forsker',
+		athlete: 'Idrettsutøver',
+		musician: 'Musiker',
+		business: 'Forretningsmann',
 		explorer: 'Utforsker',
-		athlete: 'Idrettsutøver'
+		actor: 'Skuespiller',
+		military: 'Militær',
+		religious: 'Religiøs',
+		academic: 'Akademiker',
+		engineer: 'Ingeniør',
+		default: 'Annet'
 	};
 </script>
 
@@ -92,12 +125,36 @@
 		/>
 	</div>
 
+	<!-- Toggle Filters -->
+	<div class="mb-6 space-y-3">
+		<label class="flex items-center cursor-pointer">
+			<input
+				type="checkbox"
+				bind:checked={onlyLiving}
+				class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+			/>
+			<span class="ml-2 text-sm text-gray-700 dark:text-gray-300">
+				Kun levende personer
+			</span>
+		</label>
+		<label class="flex items-center cursor-pointer">
+			<input
+				type="checkbox"
+				bind:checked={onlyWithImages}
+				class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+			/>
+			<span class="ml-2 text-sm text-gray-700 dark:text-gray-300">
+				Kun med bilder
+			</span>
+		</label>
+	</div>
+
 	<!-- Occupations -->
 	<div class="mb-6">
 		<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
 			Yrke
 		</div>
-		<div class="space-y-2">
+		<div class="space-y-2 max-h-64 overflow-y-auto">
 			{#each allOccupations as occupation}
 				<label class="flex items-center cursor-pointer">
 					<input
@@ -117,43 +174,43 @@
 	<!-- Year Range -->
 	<div class="mb-6">
 		<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-			Årstall
+			Årstall ({minYear} - {maxYear})
 		</div>
 		<div class="space-y-3">
 			<div>
 				<label for="year-from" class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-					Fra
+					Fra: {yearRange[0]}
 				</label>
 				<input
 					id="year-from"
-					type="number"
-					bind:value={yearRange[0]}
+					type="range"
 					min={minYear}
 					max={maxYear}
+					bind:value={yearRange[0]}
 					oninput={(e) => updateYearRange(0, parseInt(e.target.value) || minYear)}
-					class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+					class="w-full"
 				/>
 			</div>
 			<div>
 				<label for="year-to" class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-					Til
+					Til: {yearRange[1]}
 				</label>
 				<input
 					id="year-to"
-					type="number"
-					bind:value={yearRange[1]}
+					type="range"
 					min={minYear}
 					max={maxYear}
+					bind:value={yearRange[1]}
 					oninput={(e) => updateYearRange(1, parseInt(e.target.value) || maxYear)}
-					class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+					class="w-full"
 				/>
 			</div>
 		</div>
 	</div>
 
 	<!-- Results count -->
-	<div class="text-sm text-gray-600 dark:text-gray-400">
-		{filteredCount} {filteredCount === 1 ? 'person' : 'personer'}
+	<div class="text-sm text-gray-600 dark:text-gray-400 border-t border-gray-200 dark:border-gray-700 pt-4">
+		<div class="font-semibold">{filteredCount.toLocaleString()}</div>
+		<div>{filteredCount === 1 ? 'person' : 'personer'}</div>
 	</div>
 </div>
-

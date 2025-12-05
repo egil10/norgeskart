@@ -19,8 +19,11 @@
 
 	const margin = { top: 60, right: 40, bottom: 40, left: 80 };
 	const barHeight = 28;
+	const USE_CANVAS_THRESHOLD = 5000; // Switch to canvas rendering for large datasets
+	const shouldUseCanvas = () => people.length > USE_CANVAS_THRESHOLD;
 
 	let isInitialized = false;
+	let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(() => {
 		if (!svg || !container) return;
@@ -31,7 +34,7 @@
 		const resizeObserver = new ResizeObserver(() => {
 			updateDimensions();
 			if (isInitialized) {
-				initD3();
+				scheduleUpdate();
 			}
 		});
 
@@ -41,9 +44,16 @@
 
 	afterUpdate(() => {
 		if (isInitialized && svg && people.length > 0) {
-			updateChartData();
+			scheduleUpdate();
 		}
 	});
+
+	function scheduleUpdate() {
+		if (renderTimeout) clearTimeout(renderTimeout);
+		renderTimeout = setTimeout(() => {
+			updateChartData();
+		}, 16); // ~60fps throttling
+	}
 
 	function updateDimensions() {
 		if (!container) return;
@@ -95,7 +105,7 @@
 				])
 				.on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
 					zoomTransform = event.transform;
-					updateChartData();
+					scheduleUpdate();
 				});
 
 			d3.select(svg).call(zoom);
@@ -103,6 +113,28 @@
 		}
 
 		updateChartData();
+	}
+
+	function getVisibleRange(xScale: d3.ScaleLinear<number, number>): { start: number; end: number } {
+		// Calculate which people are visible in the viewport
+		const visibleStart = xScale.invert(-margin.left);
+		const visibleEnd = xScale.invert(width + margin.right);
+		
+		// Find indices
+		let startIdx = 0;
+		let endIdx = people.length - 1;
+		
+		for (let i = 0; i < people.length; i++) {
+			const endYear = people[i].deathYear || currentYear;
+			if (endYear >= visibleStart && startIdx === 0) {
+				startIdx = Math.max(0, i - 10); // Add some padding
+			}
+			if (people[i].birthYear <= visibleEnd) {
+				endIdx = Math.min(people.length - 1, i + 10); // Add some padding
+			}
+		}
+		
+		return { start: startIdx, end: endIdx };
 	}
 
 	function updateChartData() {
@@ -118,6 +150,13 @@
 		// Update base scale domain if needed
 		baseXScale.domain([minYear, maxYear]);
 		const currentXScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
+		
+		// Performance optimization: only render visible items
+		const visibleRange = getVisibleRange(currentXScale);
+		const visiblePeople = people.slice(visibleRange.start, visibleRange.end + 1);
+		const zoomLevel = zoomTransform?.k || 1;
+		const showLabels = zoomLevel > 0.5;
+		const showImages = zoomLevel > 0.3 && people.length < USE_CANVAS_THRESHOLD;
 
 		// Update x-axis
 		const xAxis = d3.axisBottom(currentXScale).tickFormat(d3.format('d'));
@@ -125,34 +164,45 @@
 
 		const yScale = d3
 			.scaleBand()
-			.domain(people.map((_, i) => i.toString()))
+			.domain(visiblePeople.map((_, i) => (visibleRange.start + i).toString()))
 			.range([margin.top, height - margin.bottom])
 			.padding(0.1);
 
-		// Update/create image patterns
-		const defs = g.select<SVGDefsElement>('defs');
-		defs.selectAll('pattern').remove(); // Clear old patterns
+		// Update/create image patterns (only if showing images)
+		if (showImages) {
+			const defs = g.select<SVGDefsElement>('defs');
+			// Only create patterns for visible people
+			visiblePeople.forEach((person, i) => {
+				if (!person.imageUrl) return;
+				
+				const patternId = `pattern-${person.id}`;
+				let pattern = defs.select(`#${patternId}`);
+				
+				if (pattern.empty()) {
+					pattern = defs
+						.append('pattern')
+						.attr('id', patternId)
+						.attr('patternUnits', 'userSpaceOnUse')
+						.attr('width', 28)
+						.attr('height', 28);
 
-		people.forEach((person, i) => {
-			const pattern = defs
-				.append('pattern')
-				.attr('id', `pattern-${person.id}`)
-				.attr('patternUnits', 'userSpaceOnUse')
-				.attr('width', 28)
-				.attr('height', 28)
-				.attr('x', margin.left - 44)
-				.attr('y', (yScale(i.toString()) || 0) - 14);
-
-			pattern
-				.append('image')
-				.attr('href', person.imageUrl)
-				.attr('width', 28)
-				.attr('height', 28)
-				.attr('preserveAspectRatio', 'xMidYMid slice');
-		});
+					pattern
+						.append('image')
+						.attr('href', person.imageUrl)
+						.attr('width', 28)
+						.attr('height', 28)
+						.attr('preserveAspectRatio', 'xMidYMid slice');
+				}
+				
+				// Update pattern position
+				const yPos = yScale((visibleRange.start + i).toString()) || 0;
+				pattern.attr('x', margin.left - 44).attr('y', yPos - 14);
+			});
+		}
 
 		// Bind data
-		const bars = g.selectAll<SVGGElement, Person>('.person-bar').data(people, (d: Person) => d.id);
+		const bars = g.selectAll<SVGGElement, Person>('.person-bar')
+			.data(visiblePeople, (d: Person) => d.id);
 
 		// Remove old bars
 		bars.exit().remove();
@@ -171,33 +221,33 @@
 			.transition()
 			.duration(200)
 			.attr('x', (d) => currentXScale(d.birthYear) + 8)
-			.style('display', () => {
-				const zoomLevel = zoomTransform?.k || 1;
-				return zoomLevel > 0.5 ? 'block' : 'none';
-			});
+			.style('display', showLabels ? 'block' : 'none');
 
 		// Create new bars
 		const barsEnter = bars
 			.enter()
 			.append('g')
 			.attr('class', 'person-bar')
-			.attr('transform', (_, i) => `translate(0, ${yScale(i.toString()) || 0})`);
+			.attr('transform', (_, i) => `translate(0, ${yScale((visibleRange.start + i).toString()) || 0})`);
 
-		// Add image circle
-		barsEnter
-			.append('circle')
-			.attr('class', 'person-image')
-			.attr('cx', margin.left - 30)
-			.attr('cy', barHeight / 2)
-			.attr('r', 14)
-			.attr('fill', (d: Person) => `url(#pattern-${d.id})`)
-			.attr('stroke', '#e5e7eb')
-			.attr('stroke-width', 2)
-			.attr('cursor', 'pointer')
-			.on('click', (event, d) => {
-				event.stopPropagation();
-				onPersonClick(d);
-			});
+		// Add image circle (only if showing images)
+		if (showImages) {
+			barsEnter
+				.filter((d) => d.imageUrl)
+				.append('circle')
+				.attr('class', 'person-image')
+				.attr('cx', margin.left - 30)
+				.attr('cy', barHeight / 2)
+				.attr('r', 14)
+				.attr('fill', (d: Person) => `url(#pattern-${d.id})`)
+				.attr('stroke', '#e5e7eb')
+				.attr('stroke-width', 2)
+				.attr('cursor', 'pointer')
+				.on('click', (event, d) => {
+					event.stopPropagation();
+					onPersonClick(d);
+				});
+		}
 
 		// Add bar
 		barsEnter
@@ -229,22 +279,21 @@
 				showTooltip(event, d);
 			});
 
-		// Add name label
-		barsEnter
-			.append('text')
-			.attr('class', 'bar-label')
-			.attr('x', (d) => currentXScale(d.birthYear) + 8)
-			.attr('y', barHeight / 2)
-			.attr('dy', '0.35em')
-			.attr('fill', 'white')
-			.attr('font-size', '12px')
-			.attr('font-weight', '500')
-			.attr('pointer-events', 'none')
-			.text((d) => d.name)
-			.style('display', () => {
-				const zoomLevel = zoomTransform?.k || 1;
-				return zoomLevel > 0.5 ? 'block' : 'none';
-			});
+		// Add name label (only when zoomed in enough)
+		if (showLabels) {
+			barsEnter
+				.append('text')
+				.attr('class', 'bar-label')
+				.attr('x', (d) => currentXScale(d.birthYear) + 8)
+				.attr('y', barHeight / 2)
+				.attr('dy', '0.35em')
+				.attr('fill', 'white')
+				.attr('font-size', '12px')
+				.attr('font-weight', '500')
+				.attr('pointer-events', 'none')
+				.text((d) => d.name)
+				.style('display', 'block');
+		}
 
 		// Merge
 		barsEnter.merge(bars as any);
@@ -277,6 +326,11 @@
 		class="w-full timeline-svg"
 		style="height: {height}px;"
 	></svg>
+	{#if people.length > 0}
+		<div class="absolute top-2 right-2 text-xs text-gray-500 dark:text-gray-400 bg-white/80 dark:bg-gray-900/80 px-2 py-1 rounded">
+			{people.length.toLocaleString()} personer
+		</div>
+	{/if}
 </div>
 
 <style>

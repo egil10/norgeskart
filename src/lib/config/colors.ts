@@ -1,55 +1,27 @@
+import { mapOccupationToFamily } from './occupations';
+
 export const occupationColors: Record<string, string> = {
 	artist: '#e4572e',
 	writer: '#6f4a8e',
 	politician: '#1b998b',
-	explorer: '#f0a202',
+	scientist: '#00a8e8',
 	athlete: '#0081a7',
+	musician: '#d45079',
+	business: '#4d908e',
+	explorer: '#f0a202',
+	actor: '#ee4266',
+	military: '#5e548e',
+	religious: '#5f0f40',
+	academic: '#3a86ff',
+	engineer: '#6c757d',
 	default: '#999999'
 };
 
-export const occupationMap: Record<string, string> = {
-	// Norwegian occupations
-	maler: 'artist',
-	kunstner: 'artist',
-	grafiker: 'artist',
-	forfatter: 'writer',
-	dikter: 'writer',
-	poet: 'writer',
-	skribent: 'writer',
-	politiker: 'politician',
-	statsminister: 'politician',
-	fotballspiller: 'athlete',
-	idrettsutøver: 'athlete',
-	oppdager: 'explorer',
-	utforsker: 'explorer',
-	// English occupations
-	painter: 'artist',
-	artist: 'artist',
-	graphic: 'artist',
-	author: 'writer',
-	writer: 'writer',
-	politician: 'politician',
-	prime: 'politician',
-	footballer: 'athlete',
-	athlete: 'athlete',
-	explorer: 'explorer'
-};
+export function getColorForOccupation(occupation: string): string {
+	const family = mapOccupationToFamily(occupation);
+	return occupationColors[family] || occupationColors.default;
+}
 
 export function getOccupationCategory(occupation: string): string {
-	const lower = occupation.toLowerCase();
-	
-	// Check direct mapping
-	for (const [key, value] of Object.entries(occupationMap)) {
-		if (lower.includes(key)) {
-			return value;
-		}
-	}
-	
-	return 'default';
+	return mapOccupationToFamily(occupation);
 }
-
-export function getColorForOccupation(occupation: string): string {
-	const category = getOccupationCategory(occupation);
-	return occupationColors[category] || occupationColors.default;
-}
-
