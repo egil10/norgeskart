@@ -6,11 +6,10 @@
 
 	export let people: Person[] = [];
 	export let onFiltered: (filtered: Person[]) => void = () => {};
-	export let onClose: () => void = () => {};
+	export let searchQuery: string = '';
 
 	let selectedOccupations: Set<string> = new Set(allOccupations);
 	let yearRange: [number, number] = [1500, new Date().getFullYear()];
-	let searchQuery: string = '';
 	let onlyLiving = false;
 	let onlyWithImages = false;
 	let filteredCount = people.length;
@@ -22,12 +21,14 @@
 	let Fuse: any = null;
 	let fuse: any = null;
 
-	// Load Fuse.js on client-side only to avoid SSR issues
 	onMount(async () => {
+		if (typeof window === 'undefined') return;
+		
 		try {
-			const FuseModule = await import('fuse.js');
-			Fuse = FuseModule.default;
-			if (people.length > 0) {
+			const fuseModulePath = 'fuse.js';
+			const FuseModule = await import(/* @vite-ignore */ fuseModulePath);
+			Fuse = FuseModule.default || FuseModule;
+			if (people.length > 0 && Fuse) {
 				fuse = new Fuse(people, {
 					keys: ['name', 'occupations', 'summary'],
 					threshold: 0.4,
@@ -35,7 +36,7 @@
 				});
 			}
 		} catch (e) {
-			console.warn('Fuse.js not available, falling back to simple search');
+			console.warn('Fuse.js not available, falling back to simple search', e);
 		}
 	});
 
@@ -47,7 +48,6 @@
 			if (yearRange[0] < minYear) yearRange = [minYear, yearRange[1]];
 			if (yearRange[1] > maxYear) yearRange = [yearRange[0], maxYear];
 
-			// Reinitialize Fuse when people change (client-side only)
 			if (Fuse && !fuse && typeof window !== 'undefined') {
 				fuse = new Fuse(people, {
 					keys: ['name', 'occupations', 'summary'],
@@ -77,32 +77,35 @@
 			);
 		});
 
-		// Fuzzy search
-		if (searchQuery.trim() && fuse) {
-			const searchResults = fuse.search(searchQuery);
-			const searchIds = new Set(searchResults.map(r => r.item.id));
-			
-			// Boost prominence of search matches
-			result = result.map(p => {
-				if (searchIds.has(p.id)) {
-					return {
-						...p,
-						prominenceScore: Math.min(100, p.prominenceScore + 20)
-					};
-				}
-				return p;
-			}).filter(p => {
-				// Include if matches search OR was already in result
-				return searchIds.has(p.id) || result.includes(p);
-			});
-			
-			// Sort by search relevance
-			const relevanceMap = new Map(searchResults.map(r => [r.item.id, r.score || 1]));
-			result.sort((a, b) => {
-				const aScore = relevanceMap.get(a.id) || 1;
-				const bScore = relevanceMap.get(b.id) || 1;
-				return aScore - bScore;
-			});
+		if (searchQuery.trim()) {
+			if (fuse) {
+				const searchResults = fuse.search(searchQuery);
+				const searchIds = new Set(searchResults.map(r => r.item.id));
+				result = result.map(p => {
+					if (searchIds.has(p.id)) {
+						return {
+							...p,
+							prominenceScore: Math.min(100, p.prominenceScore + 20)
+						};
+					}
+					return p;
+				}).filter(p => {
+					return searchIds.has(p.id) || result.includes(p);
+				});
+				const relevanceMap = new Map(searchResults.map(r => [r.item.id, r.score || 1]));
+				result.sort((a, b) => {
+					const aScore = relevanceMap.get(a.id) || 1;
+					const bScore = relevanceMap.get(b.id) || 1;
+					return aScore - bScore;
+				});
+			} else {
+				const query = searchQuery.toLowerCase().trim();
+				result = result.filter(p => {
+					return p.name.toLowerCase().includes(query) ||
+						p.occupations.some(occ => occ.toLowerCase().includes(query)) ||
+						p.summary.toLowerCase().includes(query);
+				});
+			}
 		}
 
 		if (onlyLiving) {
@@ -153,156 +156,75 @@
 	};
 </script>
 
-<div class="w-72 lg:w-80 h-full bg-black/60 backdrop-blur-xl border-r border-white/10 flex flex-col shadow-2xl">
-	<!-- Header -->
-	<div class="p-6 border-b border-white/10">
-		<div class="flex items-center justify-between mb-1">
-			<h2 class="text-lg font-semibold text-white">Filtre</h2>
-			<button
-				onclick={onClose}
-				class="lg:hidden p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-				aria-label="Close filters"
-			>
-				<svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-				</svg>
-			</button>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+	<!-- Occupations -->
+	<div>
+		<div class="block text-xs font-semibold text-gray-900 mb-3 uppercase tracking-wide">Yrke</div>
+		<div class="flex flex-wrap gap-2">
+			{#each allOccupations as occupation}
+				<button
+					type="button"
+					onclick={() => toggleOccupation(occupation)}
+					class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors {selectedOccupations.has(occupation) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+				>
+					{occupationLabels[occupation] || occupation}
+				</button>
+			{/each}
 		</div>
-		<p class="text-xs text-gray-400">
-			{filteredCount.toLocaleString()} av {people.length.toLocaleString()} personer
-		</p>
 	</div>
 
-	<!-- Scrollable Content -->
-	<div class="flex-1 overflow-y-auto">
-		<div class="p-6 space-y-6">
-			<!-- Search -->
+	<!-- Year Range -->
+	<div>
+		<div class="block text-xs font-semibold text-gray-900 mb-3 uppercase tracking-wide">Årstall</div>
+		<div class="space-y-3">
 			<div>
-				<label for="search-input" class="block text-xs font-medium text-gray-300 mb-2">
-					Søk
-				</label>
-				<div class="relative">
-					<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-						<svg class="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-						</svg>
-					</div>
-					<input
-						id="search-input"
-						type="text"
-						bind:value={searchQuery}
-						placeholder="Navn, yrke..."
-						class="block w-full pl-10 pr-3 py-2.5 border border-white/20 rounded-xl bg-black/40 backdrop-blur-sm text-sm text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-					/>
+				<div class="flex items-center justify-between mb-2">
+					<span class="text-sm text-gray-600">Fra: {yearRange[0]}</span>
+					<span class="text-sm text-gray-600">Til: {yearRange[1]}</span>
 				</div>
-				<p class="text-xs text-gray-500 mt-1.5">Trykk <kbd class="px-1.5 py-0.5 bg-white/10 rounded text-xs">/</kbd> for søk</p>
+				<input
+					type="range"
+					min={minYear}
+					max={maxYear}
+					bind:value={yearRange[0]}
+					oninput={(e) => updateYearRange(0, parseInt(e.target.value) || minYear)}
+					class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-gray-900"
+				/>
+				<input
+					type="range"
+					min={minYear}
+					max={maxYear}
+					bind:value={yearRange[1]}
+					oninput={(e) => updateYearRange(1, parseInt(e.target.value) || maxYear)}
+					class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-gray-900 mt-2"
+				/>
 			</div>
+		</div>
+	</div>
 
-			<!-- Quick Filters -->
-			<div class="space-y-2">
-				<label class="flex items-center justify-between p-3 rounded-xl border border-white/10 hover:bg-white/5 cursor-pointer transition-colors">
-					<span class="text-sm text-gray-300">Kun levende</span>
-					<input
-						type="checkbox"
-						bind:checked={onlyLiving}
-						class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 bg-black/40 border-white/20"
-					/>
-				</label>
-				<label class="flex items-center justify-between p-3 rounded-xl border border-white/10 hover:bg-white/5 cursor-pointer transition-colors">
-					<span class="text-sm text-gray-300">Kun med bilder</span>
-					<input
-						type="checkbox"
-						bind:checked={onlyWithImages}
-						class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 bg-black/40 border-white/20"
-					/>
-				</label>
-			</div>
-
-			<!-- Year Range -->
-			<div>
-				<div class="flex items-center justify-between mb-3">
-					<div class="text-xs font-medium text-gray-300">
-						Årstall
-					</div>
-					<span class="text-xs text-gray-400">
-						{yearRange[0]} – {yearRange[1]}
-					</span>
-				</div>
-				<div class="space-y-4">
-					<div>
-						<label for="year-from" class="sr-only">Fra år</label>
-						<input
-							id="year-from"
-							type="range"
-							min={minYear}
-							max={maxYear}
-							bind:value={yearRange[0]}
-							oninput={(e) => updateYearRange(0, parseInt(e.target.value) || minYear)}
-							class="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-600"
-						/>
-						<div class="flex justify-between text-xs text-gray-500 mt-1">
-							<span>{minYear}</span>
-							<span>Fra: {yearRange[0]}</span>
-						</div>
-					</div>
-					<div>
-						<label for="year-to" class="sr-only">Til år</label>
-						<input
-							id="year-to"
-							type="range"
-							min={minYear}
-							max={maxYear}
-							bind:value={yearRange[1]}
-							oninput={(e) => updateYearRange(1, parseInt(e.target.value) || maxYear)}
-							class="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-600"
-						/>
-						<div class="flex justify-between text-xs text-gray-500 mt-1">
-							<span>Til: {yearRange[1]}</span>
-							<span>{maxYear}</span>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- Occupations -->
-			<div>
-				<div class="block text-xs font-medium text-gray-300 mb-3">
-					Yrke
-				</div>
-				<div class="space-y-1.5 max-h-64 overflow-y-auto pr-2" role="group" aria-label="Yrke filtre">
-					{#each allOccupations as occupation}
-						<label class="flex items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors">
-							<input
-								type="checkbox"
-								checked={selectedOccupations.has(occupation)}
-								onchange={() => toggleOccupation(occupation)}
-								class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 bg-black/40 border-white/20 mr-3"
-							/>
-							<span class="text-sm text-gray-300">
-								{occupationLabels[occupation] || occupation}
-							</span>
-						</label>
-					{/each}
-				</div>
+	<!-- Quick Filters -->
+	<div>
+		<div class="block text-xs font-semibold text-gray-900 mb-3 uppercase tracking-wide">Filtre</div>
+		<div class="space-y-2">
+			<label class="flex items-center gap-2 cursor-pointer">
+				<input
+					type="checkbox"
+					bind:checked={onlyLiving}
+					class="w-4 h-4 text-gray-900 rounded focus:ring-gray-900 border-gray-300"
+				/>
+				<span class="text-sm text-gray-700">Kun levende</span>
+			</label>
+			<label class="flex items-center gap-2 cursor-pointer">
+				<input
+					type="checkbox"
+					bind:checked={onlyWithImages}
+					class="w-4 h-4 text-gray-900 rounded focus:ring-gray-900 border-gray-300"
+				/>
+				<span class="text-sm text-gray-700">Kun med bilder</span>
+			</label>
+			<div class="pt-2 text-sm text-gray-600">
+				{filteredCount.toLocaleString()} av {people.length.toLocaleString()} personer
 			</div>
 		</div>
 	</div>
 </div>
-
-<style>
-	kbd {
-		font-family: ui-monospace, monospace;
-	}
-	
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border-width: 0;
-	}
-</style>

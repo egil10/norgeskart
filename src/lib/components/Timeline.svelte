@@ -10,14 +10,15 @@
 	let svg: SVGSVGElement;
 	let container: HTMLDivElement;
 	let width = 0;
-	let height = 800;
+	let height = 1200; // Much taller to spread people out
 	let currentYear = new Date().getFullYear();
 
 	const MIN_YEAR = 1500;
 	const MAX_YEAR = 2025;
 	const margin = { top: 80, right: 60, bottom: 100, left: 60 };
 	const densityBarWidth = 40;
-	const JITTER_RANGE = 30;
+	const VERTICAL_SPREAD = 1200; // Vertical space to spread people
+	const MIN_SPACING = 40; // Minimum pixels between people at same time
 
 	let baseXScale: d3.ScaleLinear<number, number>;
 	let zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
@@ -29,16 +30,62 @@
 	let selectionStart: number | null = null;
 	let selectionEnd: number | null = null;
 
-	// Jitter map for consistent Y positions
-	const jitterMap = new Map<string, number>();
+	// Y position map for consistent vertical spreading
+	const yPositionMap = new Map<string, number>();
 
-	function getJitterY(personId: string): number {
-		if (!jitterMap.has(personId)) {
-			// Create consistent random offset based on ID
-			const hash = personId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-			jitterMap.set(personId, (hash % (JITTER_RANGE * 2)) - JITTER_RANGE);
+	function calculateYPositions(people: Person[], xScale: d3.ScaleLinear<number, number>): Map<string, number> {
+		const positions = new Map<string, number>();
+		const timelineTop = margin.top;
+		const timelineBottom = height - margin.bottom;
+		const timelineHeight = timelineBottom - timelineTop;
+		
+		// Group people by their X position (birth year)
+		const peopleByX = new Map<number, Person[]>();
+		people.forEach(person => {
+			const x = Math.round(xScale(person.birthYear) / MIN_SPACING) * MIN_SPACING;
+			if (!peopleByX.has(x)) {
+				peopleByX.set(x, []);
+			}
+			peopleByX.get(x)!.push(person);
+		});
+
+		// Spread people out vertically
+		peopleByX.forEach((peopleAtX, x) => {
+			if (peopleAtX.length === 1) {
+				// Single person - place in middle area
+				const hash = peopleAtX[0].id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+				const y = timelineTop + (timelineHeight / 2) + (hash % (timelineHeight / 4)) - (timelineHeight / 8);
+				positions.set(peopleAtX[0].id, Math.max(timelineTop + 20, Math.min(timelineBottom - 20, y)));
+			} else {
+				// Multiple people - spread evenly
+				peopleAtX.sort((a, b) => {
+					const hashA = a.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+					const hashB = b.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+					return hashA - hashB;
+				});
+				
+				const spacing = Math.min(MIN_SPACING, timelineHeight / peopleAtX.length);
+				const startY = timelineTop + (timelineHeight - (peopleAtX.length - 1) * spacing) / 2;
+				
+				peopleAtX.forEach((person, index) => {
+					positions.set(person.id, startY + index * spacing);
+				});
+			}
+		});
+
+		return positions;
+	}
+
+	function getYPosition(person: Person, xScale: d3.ScaleLinear<number, number>, allVisiblePeople: Person[]): number {
+		// Recalculate if needed
+		const key = `${person.id}_${xScale.range()[0]}_${xScale.range()[1]}`;
+		if (!yPositionMap.has(key)) {
+			const positions = calculateYPositions(allVisiblePeople, xScale);
+			positions.forEach((y, id) => {
+				yPositionMap.set(`${id}_${xScale.range()[0]}_${xScale.range()[1]}`, y);
+			});
 		}
-		return jitterMap.get(personId)!;
+		return yPositionMap.get(key) || (height / 2);
 	}
 
 	function zoomThreshold(scale: number): number {
@@ -281,8 +328,7 @@
 			.attr('opacity', 0.6)
 			.attr('rx', 2);
 
-		// Person dots
-		const centerY = (height - margin.top - margin.bottom) / 2 + margin.top;
+		// Person dots - spread vertically
 		const dots = g.select('.dots')
 			.selectAll<SVGCircleElement, Person>('.person-dot')
 			.data(visiblePeople, d => d.id);
@@ -315,7 +361,7 @@
 			.transition()
 			.duration(300)
 			.attr('cx', d => xScale(d.birthYear))
-			.attr('cy', centerY + getJitterY(d.id))
+			.attr('cy', d => getYPosition(d, xScale, visiblePeople))
 			.attr('r', d => {
 				const inSelection = isInSelection(d);
 				return inSelection ? (topIds.has(d.id) ? 10 : 7) : (topIds.has(d.id) ? 8 : 5);
@@ -326,10 +372,10 @@
 				if (isInSelection(d)) return 1;
 				return 0.8;
 			})
-			.attr('stroke', d => {
-				if (isInSelection(d)) return '#ffff00';
-				return topIds.has(d.id) ? 'white' : 'rgba(255,255,255,0.5)';
-			})
+		.attr('stroke', d => {
+			if (isInSelection(d)) return '#fbbf24';
+			return topIds.has(d.id) ? '#111827' : 'rgba(17,24,39,0.3)';
+		})
 			.attr('stroke-width', d => {
 				if (isInSelection(d)) return 3;
 				return topIds.has(d.id) ? 2 : 1;
@@ -381,15 +427,15 @@
 
 		labelsEnter.merge(labels as any)
 			.attr('x', d => xScale(d.birthYear) + (topIds.has(d.id) ? 10 : 8))
-			.attr('y', d => centerY + getJitterY(d.id) - 10)
-			.attr('fill', 'white')
-			.attr('font-size', d => topIds.has(d.id) ? '13px' : '11px')
-			.attr('font-weight', d => topIds.has(d.id) ? '600' : '500')
-			.style('paint-order', 'stroke')
-			.style('stroke', 'rgba(0,0,0,0.6)')
-			.style('stroke-width', '3px')
-			.style('stroke-linejoin', 'round')
-			.text(d => d.name);
+			.attr('y', d => getYPosition(d, xScale, visiblePeople) - 10)
+		.attr('fill', '#111827')
+		.attr('font-size', d => topIds.has(d.id) ? '13px' : '11px')
+		.attr('font-weight', d => topIds.has(d.id) ? '600' : '500')
+		.style('paint-order', 'stroke')
+		.style('stroke', '#faf9f6')
+		.style('stroke-width', '4px')
+		.style('stroke-linejoin', 'round')
+		.text(d => d.name);
 
 		// Selection highlight (Alt-drag)
 		const selection = g.select('.selection');
@@ -430,13 +476,13 @@
 			indicator.append('rect')
 				.attr('class', 'zoom-indicator-bg')
 				.attr('rx', 12)
-				.attr('fill', 'rgba(0,0,0,0.7)');
+				.attr('fill', 'rgba(255,255,255,0.9)');
 			indicator.append('text')
 				.attr('class', 'zoom-indicator-text')
 				.attr('x', 12)
 				.attr('y', 22)
 				.attr('font-size', '12px')
-				.attr('fill', 'white')
+				.attr('fill', '#111827')
 				.attr('font-weight', '500');
 		}
 
@@ -469,9 +515,9 @@
 			.style('left', event.pageX + 15 + 'px')
 			.style('top', event.pageY - 10 + 'px')
 			.html(`
-				<div class="font-semibold text-sm">${person.name}</div>
-				<div class="text-xs text-gray-300 mt-0.5">${person.birthYear}${person.deathYear ? `–${person.deathYear}` : '–'}</div>
-				<div class="text-xs text-gray-400 mt-1">${person.occupations.slice(0, 2).join(', ')}</div>
+				<div class="font-semibold text-sm text-gray-900">${person.name}</div>
+				<div class="text-xs text-gray-600 mt-0.5">${person.birthYear}${person.deathYear ? `–${person.deathYear}` : '–'}</div>
+				<div class="text-xs text-gray-500 mt-1">${person.occupations.slice(0, 2).join(', ')}</div>
 			`);
 	}
 
@@ -638,7 +684,7 @@
 	});
 </script>
 
-<div bind:this={container} class="w-full h-full relative bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
+<div bind:this={container} class="w-full h-full relative bg-[#faf9f6]">
 	<svg
 		bind:this={svg}
 		class="w-full timeline-svg"
@@ -647,29 +693,29 @@
 	></svg>
 
 	<!-- Controls -->
-	<div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/60 backdrop-blur-xl px-4 py-3 rounded-2xl border border-white/10 shadow-2xl">
+	<div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-xl border border-gray-200 shadow-lg">
 		<button
 			onclick={handleZoomOut}
-			class="p-2.5 hover:bg-white/10 rounded-xl transition-all hover:scale-110"
+			class="p-2 hover:bg-gray-100 rounded-lg transition-all"
 			aria-label="Zoom out"
 		>
-			<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="w-5 h-5 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"></path>
 			</svg>
 		</button>
 		<button
 			onclick={handleZoomIn}
-			class="p-2.5 hover:bg-white/10 rounded-xl transition-all hover:scale-110"
+			class="p-2 hover:bg-gray-100 rounded-lg transition-all"
 			aria-label="Zoom in"
 		>
-			<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<svg class="w-5 h-5 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"></path>
 			</svg>
 		</button>
-		<div class="w-px h-6 bg-white/20"></div>
+		<div class="w-px h-6 bg-gray-300"></div>
 		<button
 			onclick={handleGoToToday}
-			class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-medium text-sm"
+			class="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg transition-all font-medium text-sm"
 		>
 			I dag
 		</button>
@@ -687,31 +733,30 @@
 	}
 
 	:global(.x-axis text) {
-		fill: rgba(255, 255, 255, 0.7);
+		fill: #6b7280;
 		font-size: 11px;
 		font-weight: 500;
 	}
 
 	:global(.x-axis path),
 	:global(.x-axis line) {
-		stroke: rgba(255, 255, 255, 0.2);
+		stroke: #d1d5db;
 		stroke-width: 1.5;
 	}
 
 	:global(.tooltip) {
 		position: absolute;
 		padding: 10px 14px;
-		background: rgba(0, 0, 0, 0.95);
-		backdrop-filter: blur(12px);
-		color: white;
-		border-radius: 10px;
+		background: white;
+		color: #111827;
+		border-radius: 8px;
 		pointer-events: none;
 		font-size: 13px;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+		box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 		z-index: 1000;
 		opacity: 0;
 		transition: opacity 0.2s;
 		min-width: 150px;
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		border: 1px solid #e5e7eb;
 	}
 </style>

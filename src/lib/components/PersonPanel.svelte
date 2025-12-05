@@ -68,22 +68,22 @@
 
 {#if person}
 	<div
-		class="person-panel fixed top-0 right-0 h-full bg-black/80 backdrop-blur-2xl shadow-2xl z-50 transform transition-transform duration-300 ease-out border-l border-white/10"
+		class="person-panel fixed top-0 right-0 h-full bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-out border-l border-gray-200"
 		class:translate-x-0={isOpen}
 		class:translate-x-full={!isOpen}
 		style="width: 480px; max-width: 90vw;"
 	>
 		<div class="flex flex-col h-full">
 			<!-- Header -->
-			<div class="flex items-center justify-between p-6 border-b border-white/10">
-				<h2 class="text-lg font-semibold text-white">Detaljer</h2>
+			<div class="flex items-center justify-between p-6 border-b border-gray-200">
+				<h2 class="text-lg font-semibold text-gray-900">Detaljer</h2>
 				<button
 					onclick={close}
-					class="p-2 hover:bg-white/10 rounded-lg transition-colors"
+					class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
 					aria-label="Close panel"
 				>
 					<svg
-						class="w-5 h-5 text-gray-400"
+						class="w-5 h-5 text-gray-600"
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
@@ -102,7 +102,7 @@
 			<div class="flex-1 overflow-y-auto">
 				<div class="space-y-6">
 					<!-- Hero Image -->
-					<div class="relative h-64 bg-gradient-to-br from-blue-900/40 via-purple-900/40 to-pink-900/40">
+					<div class="relative h-64 bg-gray-100">
 						{#if person.imageUrl}
 							<img
 								src={person.imageUrl}
@@ -114,28 +114,27 @@
 									e.currentTarget.nextElementSibling?.classList.remove('hidden');
 								}}
 							/>
-							<div class="hidden absolute inset-0 bg-gradient-to-br from-gray-900 to-black flex items-center justify-center">
-								<svg class="w-20 h-20 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<div class="hidden absolute inset-0 bg-gray-100 flex items-center justify-center">
+								<svg class="w-20 h-20 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
 								</svg>
 							</div>
 						{:else}
-							<div class="absolute inset-0 bg-gradient-to-br from-gray-900 to-black flex items-center justify-center">
-								<svg class="w-20 h-20 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<div class="absolute inset-0 bg-gray-100 flex items-center justify-center">
+								<svg class="w-20 h-20 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
 								</svg>
 							</div>
 						{/if}
-						<!-- Gradient overlay -->
-						<div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-						<!-- Name overlay -->
-						<div class="absolute bottom-0 left-0 right-0 p-6">
-							<h1 class="text-3xl font-bold text-white mb-1 drop-shadow-lg">
-								{person.name}
-							</h1>
-							<div class="text-lg text-gray-300 font-medium">
-								{person.birthYear} {person.deathYear ? `– ${person.deathYear}` : '–'}
-							</div>
+					</div>
+					
+					<!-- Name -->
+					<div class="px-6 pt-6">
+						<h1 class="text-3xl font-bold text-gray-900 mb-2">
+							{person.name}
+						</h1>
+						<div class="text-lg text-gray-600 font-medium">
+							{person.birthYear} {person.deathYear ? `– ${person.deathYear}` : '–'}
 						</div>
 					</div>
 
@@ -143,7 +142,7 @@
 						<!-- Occupations -->
 						{#if person.occupations.length > 0}
 							<div>
-								<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+								<h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">
 									Yrker
 								</h3>
 								<div class="flex flex-wrap gap-2">
@@ -161,10 +160,10 @@
 
 						<!-- Summary -->
 						<div>
-							<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+							<h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">
 								Om
 							</h3>
-							<p class="text-sm text-gray-300 leading-relaxed">
+							<p class="text-sm text-gray-700 leading-relaxed">
 								{person.summary || `${person.name} er en norsk person.`}
 							</p>
 						</div>
@@ -173,28 +172,28 @@
 						{#if relatedPeople.length > 0}
 							<div>
 								<div class="flex items-center justify-between mb-3">
-									<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+									<h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wider">
 										Relaterte personer
 									</h3>
 									<div class="flex gap-1">
 										<button
-											onclick={() => scrollRelated('left')}
-											class="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-											aria-label="Scroll left"
-										>
-											<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-											</svg>
-										</button>
-										<button
-											onclick={() => scrollRelated('right')}
-											class="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-											aria-label="Scroll right"
-										>
-											<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-											</svg>
-										</button>
+									onclick={() => scrollRelated('left')}
+									class="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+									aria-label="Scroll left"
+								>
+									<svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+									</svg>
+								</button>
+								<button
+									onclick={() => scrollRelated('right')}
+									class="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+									aria-label="Scroll right"
+								>
+									<svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+									</svg>
+								</button>
 									</div>
 								</div>
 								<div
@@ -205,7 +204,7 @@
 									{#each relatedPeople as related}
 										<button
 											onclick={() => { person = related; }}
-											class="flex-shrink-0 w-64 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl overflow-hidden transition-all hover:scale-105 cursor-pointer"
+											class="flex-shrink-0 w-64 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl overflow-hidden transition-all hover:scale-105 cursor-pointer"
 										>
 											{#if related.imageUrl}
 												<img
@@ -218,17 +217,17 @@
 													}}
 												/>
 											{:else}
-												<div class="w-full h-32 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
-													<svg class="w-8 h-8 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<div class="w-full h-32 bg-gray-200 flex items-center justify-center">
+													<svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
 													</svg>
 												</div>
 											{/if}
 											<div class="p-3">
-												<div class="text-sm font-semibold text-white truncate">
+												<div class="text-sm font-semibold text-gray-900 truncate">
 													{related.name}
 												</div>
-												<div class="text-xs text-gray-400 mt-0.5">
+												<div class="text-xs text-gray-600 mt-0.5">
 													{related.birthYear} {related.deathYear ? `– ${related.deathYear}` : '–'}
 												</div>
 											</div>
@@ -243,10 +242,10 @@
 
 			<!-- Footer -->
 			{#if person.wikipediaUrl}
-				<div class="p-6 border-t border-white/10">
+				<div class="p-6 border-t border-gray-200">
 					<button
 						onclick={openWikipedia}
-						class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors font-medium flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+						class="w-full px-4 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 shadow-sm hover:shadow"
 					>
 						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path
@@ -266,7 +265,7 @@
 	<!-- Backdrop -->
 	{#if isOpen}
 		<div
-			class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity duration-300"
+			class="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity duration-300"
 			onclick={close}
 			role="button"
 			tabindex="-1"
