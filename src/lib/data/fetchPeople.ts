@@ -313,10 +313,11 @@ function parseYear(dateString: string | undefined): number | null {
 	return null;
 }
 
-function extractImageUrl(imageValue: string | undefined): string | null {
+async function extractImageUrl(imageValue: string | undefined): Promise<string | null> {
 	if (!imageValue) return null;
 	
 	let filename: string;
+	let directoryPath: string | null = null;
 	
 	if (imageValue.includes('http')) {
 		// Extract filename from various URL formats
@@ -325,15 +326,35 @@ function extractImageUrl(imageValue: string | undefined): string | null {
 		} else if (imageValue.includes('/wiki/File:')) {
 			filename = decodeURIComponent(imageValue.split('/wiki/File:')[1].split('?')[0]);
 		} else if (imageValue.includes('upload.wikimedia.org')) {
-			// Already a direct Commons URL - extract filename and rebuild properly
-			const parts = imageValue.split('/');
-			const fileIndex = parts.findIndex(p => p.includes('.'));
-			if (fileIndex > 0) {
-				filename = parts.slice(fileIndex).join('/');
-				// Remove thumbnail size if present
-				filename = filename.replace(/\d+px-/, '');
+			// Already a direct Commons URL - extract the actual path
+			const urlMatch = imageValue.match(/upload\.wikimedia\.org\/wikipedia\/commons\/(thumb\/)?(.+)/);
+			if (urlMatch) {
+				const pathAfterCommons = urlMatch[2];
+				
+				// Check if it's a thumbnail URL (contains /thumb/ and /200px- or similar)
+				if (pathAfterCommons.startsWith('thumb/')) {
+					// Extract the directory path (before the filename) and filename
+					// Format: thumb/X/Xy/Filename.ext/200px-Filename.ext
+					const parts = pathAfterCommons.replace(/^thumb\//, '').split('/');
+					const lastPart = parts[parts.length - 1];
+					
+					// Remove thumbnail size prefix (e.g., "200px-")
+					const actualFilename = lastPart.replace(/^\d+px-/, '');
+					
+					// IMPORTANT: Don't trust the directory path in thumbnail URLs
+					// Commons uses MD5 hashing, and thumbnail URLs may have wrong paths
+					// Extract just the filename and let it fall through to filename-based construction
+					filename = actualFilename;
+					directoryPath = null; // Force re-construction from filename
+				} else {
+					// Full resolution URL - extract directory and filename
+					const parts = pathAfterCommons.split('/');
+					filename = parts[parts.length - 1];
+					// For full URLs, trust the directory path
+					directoryPath = parts.slice(0, -1).join('/');
+				}
 			} else {
-				return imageValue; // Return as-is if we can't parse
+				return null;
 			}
 		} else {
 			return null;
@@ -343,23 +364,67 @@ function extractImageUrl(imageValue: string | undefined): string | null {
 		filename = decodeURIComponent(imageValue);
 	}
 	
-	// Clean filename
-	filename = filename.replace(/\s/g, '_').replace(/^_+|_+$/g, '');
+	// Clean filename - decode URL encoding and normalize
+	filename = decodeURIComponent(filename).replace(/\s/g, '_').replace(/^_+|_+$/g, '');
 	if (!filename) return null;
 	
-	// Get first char and first two chars for Commons directory structure
-	const firstChar = filename.charAt(0);
-	const firstTwo = filename.substring(0, 2);
+	// If we have a directory path from a full URL (not thumbnail), use it
+	if (directoryPath && !imageValue?.includes('/thumb/')) {
+		return `https://upload.wikimedia.org/wikipedia/commons/${directoryPath}/${encodeURIComponent(filename)}`;
+	}
 	
-	// Encode filename properly (space to underscore, etc.)
-	const encodedFilename = encodeURIComponent(filename).replace(/%20/g, '_');
+	// For thumbnail URLs or raw filenames, use MediaWiki API to get correct URL
+	// This ensures we get the right MD5-based directory structure
+	try {
+		const imageUrl = await resolveImageUrl(filename);
+		if (imageUrl) return imageUrl;
+	} catch (error) {
+		// Silently fail - will use fallback
+	}
 	
-	// Construct Commons thumbnail URL (200px - good balance of quality/size)
-	// For full resolution, remove '/200px-' part
-	return `https://upload.wikimedia.org/wikipedia/commons/thumb/${firstChar}/${firstTwo}/${encodedFilename}/200px-${encodedFilename}`;
+	// Fallback: construct using Special:FilePath (may redirect, but should work)
+	const encodedFilename = encodeURIComponent(filename);
+	return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodedFilename}`;
 }
 
-function processRows(rows: SparqlRow[], existingPeople: Map<string, PersonData>): PersonData[] {
+// Resolve filename to actual Commons image URL using MediaWiki API
+async function resolveImageUrl(filename: string): Promise<string | null> {
+	try {
+		const apiUrl = `https://commons.wikimedia.org/w/api.php?` +
+			`action=query&` +
+			`titles=File:${encodeURIComponent(filename)}&` +
+			`prop=imageinfo&` +
+			`iiprop=url&` +
+			`format=json&` +
+			`origin=*`;
+		
+		const response = await fetch(apiUrl, {
+			headers: {
+				'User-Agent': 'Norgeskart/1.0 (https://github.com/your-repo)'
+			}
+		});
+		
+		if (!response.ok) return null;
+		
+		const data = await response.json();
+		const pages = data.query?.pages;
+		if (!pages) return null;
+		
+		const pageId = Object.keys(pages)[0];
+		const page = pages[pageId];
+		const imageinfo = page?.imageinfo?.[0];
+		
+		if (imageinfo?.url) {
+			return imageinfo.url;
+		}
+	} catch (error) {
+		// Fail silently
+	}
+	
+	return null;
+}
+
+async function processRows(rows: SparqlRow[], existingPeople: Map<string, PersonData>): Promise<PersonData[]> {
 	const personMap = new Map<string, {
 		id: string;
 		name: string;
@@ -389,7 +454,7 @@ function processRows(rows: SparqlRow[], existingPeople: Map<string, PersonData>)
 				name: row.personLabel?.value || 'Unknown',
 				birthYear,
 				deathYear,
-				imageUrl: extractImageUrl(row.image?.value),
+				imageUrl: await extractImageUrl(row.image?.value),
 				wikipediaUrl: row.article?.value || null,
 				summary: row.personDescription?.value || '',
 				occupations: new Set()
@@ -470,7 +535,7 @@ async function fetchCategory(category?: string) {
 				break;
 			}
 			
-			const newPeople = processRows(rows, existingPeople);
+			const newPeople = await processRows(rows, existingPeople);
 			newPeople.forEach(p => {
 				if (!existingPeople.has(p.id)) {
 					existingPeople.set(p.id, p);

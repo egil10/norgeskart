@@ -141,9 +141,20 @@
 			d3.select(svg).selectAll('*').remove();
 			g = d3.select(svg).append('g');
 
+			// Create defs for clipping (for circular images)
+			const defs = g.append('defs');
+			// Create a reusable circular clip path that we can scale
+			const clipCircle = defs.append('clipPath')
+				.attr('id', 'clip-circle');
+			clipCircle.append('circle')
+				.attr('r', 50)
+				.attr('cx', 50)
+				.attr('cy', 50);
+
 			// Create groups
 			g.append('g').attr('class', 'density-bars');
-			g.append('g').attr('class', 'dots');
+			g.append('g').attr('class', 'lifespan-segments');
+			g.append('g').attr('class', 'person-images');
 			g.append('g').attr('class', 'labels');
 			g.append('g').attr('class', 'x-axis')
 				.attr('transform', `translate(0, ${height - margin.bottom})`);
@@ -328,18 +339,6 @@
 			.attr('opacity', 0.6)
 			.attr('rx', 2);
 
-		// Person dots - spread vertically
-		const dots = g.select('.dots')
-			.selectAll<SVGCircleElement, Person>('.person-dot')
-			.data(visiblePeople, d => d.id);
-
-		dots.exit()
-			.transition()
-			.duration(200)
-			.attr('opacity', 0)
-			.attr('r', 0)
-			.remove();
-
 		// Check if person is in selection range
 		const isInSelection = (person: Person): boolean => {
 			if (!isAltDragging || selectionStart === null || selectionEnd === null) return false;
@@ -351,39 +350,62 @@
 			return person.birthYear <= maxYear && personEndYear >= minYear;
 		};
 
-		const dotsEnter = dots.enter()
-			.append('circle')
-			.attr('class', 'person-dot')
-			.attr('opacity', 0)
-			.attr('r', 0);
+		// Lifespan segments (horizontal bars like the Big Map)
+		const segmentHeight = Math.max(2, Math.min(6, 20 / zoomLevel));
+		const segments = g.select('.lifespan-segments')
+			.selectAll<SVGRectElement, Person>('.lifespan-segment')
+			.data(visiblePeople, d => d.id);
 
-		dotsEnter.merge(dots as any)
+		segments.exit()
+			.transition()
+			.duration(200)
+			.attr('opacity', 0)
+			.attr('height', 0)
+			.remove();
+
+		const segmentsEnter = segments.enter()
+			.append('rect')
+			.attr('class', 'lifespan-segment')
+			.attr('opacity', 0)
+			.attr('height', 0);
+
+		segmentsEnter.merge(segments as any)
 			.transition()
 			.duration(300)
-			.attr('cx', d => xScale(d.birthYear))
-			.attr('cy', d => getYPosition(d, xScale, visiblePeople))
-			.attr('r', d => {
-				const inSelection = isInSelection(d);
-				return inSelection ? (topIds.has(d.id) ? 10 : 7) : (topIds.has(d.id) ? 8 : 5);
+			.attr('x', d => {
+				const startX = xScale(d.birthYear);
+				return Math.max(margin.left + densityBarWidth, startX);
 			})
+			.attr('y', d => {
+				const yPos = getYPosition(d, xScale, visiblePeople);
+				return yPos - segmentHeight / 2;
+			})
+			.attr('width', d => {
+				const endYear = d.deathYear || currentYear;
+				const startX = xScale(d.birthYear);
+				const endX = xScale(endYear);
+				const width = Math.max(10, endX - startX);
+				return width;
+			})
+			.attr('height', segmentHeight)
 			.attr('fill', d => d.color)
 			.attr('opacity', d => {
 				if (hoveredPerson?.id === d.id) return 1;
-				if (isInSelection(d)) return 1;
-				return 0.8;
+				if (isInSelection(d)) return 0.95;
+				return topIds.has(d.id) ? 0.85 : 0.7;
 			})
-		.attr('stroke', d => {
-			if (isInSelection(d)) return '#fbbf24';
-			return topIds.has(d.id) ? '#111827' : 'rgba(17,24,39,0.3)';
-		})
+			.attr('stroke', d => {
+				if (isInSelection(d)) return '#fbbf24';
+				return topIds.has(d.id) ? '#111827' : 'rgba(17,24,39,0.2)';
+			})
 			.attr('stroke-width', d => {
-				if (isInSelection(d)) return 3;
-				return topIds.has(d.id) ? 2 : 1;
+				if (isInSelection(d)) return 2;
+				return topIds.has(d.id) ? 1.5 : 0.5;
 			})
 			.attr('cursor', 'pointer')
+			.attr('rx', 1)
 			.style('filter', d => {
-				if (hoveredPerson?.id === d.id) return 'drop-shadow(0 0 8px ' + d.color + ')';
-				if (isInSelection(d)) return 'drop-shadow(0 0 12px #ffff00)';
+				if (hoveredPerson?.id === d.id) return 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))';
 				return 'none';
 			})
 			.on('click', (event, d) => {
@@ -396,46 +418,161 @@
 					.attr('opacity', 1)
 					.transition()
 					.duration(150)
-					.attr('r', topIds.has(d.id) ? 10 : 7);
+					.attr('height', segmentHeight * 1.5);
 				showTooltip(event, d);
 			})
 			.on('mouseleave', (event) => {
 				hoveredPerson = null;
 				d3.select(event.currentTarget)
-					.attr('opacity', 0.8)
+					.attr('opacity', 0.7)
 					.transition()
 					.duration(150)
-					.attr('r', topIds.has(event.currentTarget.__data__.id) ? 8 : 5);
+					.attr('height', segmentHeight);
 				hideTooltip();
 			})
 			.on('mousemove', (event, d) => {
 				showTooltip(event, d);
 			});
 
-		// Labels (top people always, others when zoomed)
+		// Images (only when zoomed in enough)
+		const showImages = zoomLevel > 5;
+		const imageSize = Math.max(20, Math.min(40, zoomLevel * 3));
+		
+		if (showImages) {
+			const imageGroups = g.select('.person-images')
+				.selectAll<SVGGElement, Person>('.person-image-group')
+				.data(visiblePeople.filter(p => p.imageUrl && (topIds.has(p.id) || zoomLevel > 8)), d => d.id);
+
+			imageGroups.exit().remove();
+
+			const imageGroupsEnter = imageGroups.enter()
+				.append('g')
+				.attr('class', 'person-image-group')
+				.attr('opacity', 0);
+
+			imageGroupsEnter.merge(imageGroups as any)
+				.transition()
+				.duration(300)
+				.attr('opacity', d => hoveredPerson?.id === d.id ? 1 : 0.9)
+				.attr('transform', d => {
+					const startX = xScale(d.birthYear);
+					const x = Math.max(margin.left + densityBarWidth, startX) - imageSize / 2;
+					const y = getYPosition(d, xScale, visiblePeople) - imageSize / 2;
+					return `translate(${x}, ${y})`;
+				})
+				.style('cursor', 'pointer')
+				.on('click', (event, d) => {
+					event.stopPropagation();
+					onPersonClick(d);
+				});
+
+			// Create clip paths for circular images
+			imageGroupsEnter.each(function(d, i) {
+				const clipId = `clip-person-${i}-${d.id.replace(/[^a-zA-Z0-9]/g, '')}`;
+				const defs = g.select('defs');
+				const existingClip = defs.select(`#${clipId}`);
+				if (existingClip.empty()) {
+					defs.append('clipPath')
+						.attr('id', clipId)
+						.append('circle')
+						.attr('r', imageSize / 2)
+						.attr('cx', imageSize / 2)
+						.attr('cy', imageSize / 2);
+				}
+				
+				// Add image to group with clip path
+				d3.select(this).append('image')
+					.attr('class', 'person-image')
+					.attr('width', imageSize)
+					.attr('height', imageSize)
+					.attr('href', d.imageUrl || '')
+					.attr('clip-path', `url(#${clipId})`)
+					.on('error', function() {
+						d3.select(this.parentElement).attr('opacity', 0);
+					});
+			});
+
+			// Update existing images
+			imageGroups.selectAll('.person-image')
+				.attr('width', imageSize)
+				.attr('height', imageSize);
+		} else {
+			g.select('.person-images').selectAll('.person-image-group').remove();
+		}
+
+		// Labels (on segments - name and years)
+		const showNameLabels = zoomLevel > 2 || topIds.size > 0;
 		const labels = g.select('.labels')
-			.selectAll<SVGTextElement, Person>('.person-label')
-			.data(visiblePeople.filter(p => topIds.has(p.id) || showLabels), d => d.id);
+			.selectAll<SVGGElement, Person>('.person-label-group')
+			.data(visiblePeople.filter(p => showNameLabels && (topIds.has(p.id) || zoomLevel > 2.5)), d => d.id);
 
 		labels.exit().remove();
 
 		const labelsEnter = labels.enter()
-			.append('text')
-			.attr('class', 'person-label')
-			.attr('text-anchor', 'start')
+			.append('g')
+			.attr('class', 'person-label-group')
 			.attr('pointer-events', 'none');
 
-		labelsEnter.merge(labels as any)
-			.attr('x', d => xScale(d.birthYear) + (topIds.has(d.id) ? 10 : 8))
-			.attr('y', d => getYPosition(d, xScale, visiblePeople) - 10)
-		.attr('fill', '#111827')
-		.attr('font-size', d => topIds.has(d.id) ? '13px' : '11px')
-		.attr('font-weight', d => topIds.has(d.id) ? '600' : '500')
-		.style('paint-order', 'stroke')
-		.style('stroke', '#faf9f6')
-		.style('stroke-width', '4px')
-		.style('stroke-linejoin', 'round')
-		.text(d => d.name);
+		const labelGroups = labelsEnter.merge(labels as any);
+
+		// Name label
+		const nameLabels = labelGroups.selectAll<SVGTextElement, Person>('.name-label')
+			.data(d => [d]);
+
+		nameLabels.enter()
+			.append('text')
+			.attr('class', 'name-label')
+			.merge(nameLabels as any)
+			.transition()
+			.duration(300)
+			.attr('x', d => {
+				const startX = xScale(d.birthYear);
+				return Math.max(margin.left + densityBarWidth + 4, startX);
+			})
+			.attr('y', d => {
+				const yPos = getYPosition(d, xScale, visiblePeople);
+				return yPos - segmentHeight / 2 - 3;
+			})
+			.attr('fill', '#111827')
+			.attr('font-size', d => topIds.has(d.id) ? '12px' : '10px')
+			.attr('font-weight', d => topIds.has(d.id) ? '600' : '500')
+			.style('paint-order', 'stroke')
+			.style('stroke', '#faf9f6')
+			.style('stroke-width', '3px')
+			.style('stroke-linejoin', 'round')
+			.text(d => d.name);
+
+		// Years label (on segment or below)
+		const yearLabels = labelGroups.selectAll<SVGTextElement, Person>('.year-label')
+			.data(d => [d]);
+
+		yearLabels.enter()
+			.append('text')
+			.attr('class', 'year-label')
+			.merge(yearLabels as any)
+			.transition()
+			.duration(300)
+			.attr('x', d => {
+				const endYear = d.deathYear || currentYear;
+				const endX = xScale(endYear);
+				return endX - 2;
+			})
+			.attr('y', d => {
+				const yPos = getYPosition(d, xScale, visiblePeople);
+				return yPos + segmentHeight / 2 + 12;
+			})
+			.attr('fill', '#6b7280')
+			.attr('font-size', '9px')
+			.attr('font-weight', '400')
+			.attr('text-anchor', 'end')
+			.style('paint-order', 'stroke')
+			.style('stroke', '#faf9f6')
+			.style('stroke-width', '2px')
+			.style('stroke-linejoin', 'round')
+			.text(d => {
+				const endYear = d.deathYear || currentYear;
+				return `${d.birthYear}–${endYear}`;
+			});
 
 		// Selection highlight (Alt-drag)
 		const selection = g.select('.selection');
