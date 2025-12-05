@@ -532,8 +532,39 @@ async function main() {
 	try {
 		// Parse command line args
 		const args = process.argv.slice(2);
-		const category = args.find(arg => arg.startsWith('--category='))?.split('=')[1] ||
-		                args.find(arg => arg === '--category') ? args[args.indexOf('--category') + 1] : undefined;
+		
+		// Debug: log all arguments
+		if (args.length > 0) {
+			logInfo(`Arguments received: ${args.join(', ')}`);
+		}
+		
+		// Handle --category=value or --category value
+		let category: string | undefined;
+		
+		// Try to find category argument
+		for (let i = 0; i < args.length; i++) {
+			const arg = args[i];
+			if (arg === '--category' && i + 1 < args.length) {
+				category = args[i + 1];
+				break;
+			} else if (arg.startsWith('--category=')) {
+				// Handle --category=value format
+				category = arg.substring('--category='.length);
+				break;
+			} else if (arg.includes('--category=')) {
+				// Fallback: handle if format is slightly different
+				const parts = arg.split('--category=');
+				if (parts.length > 1) {
+					category = parts[1];
+					break;
+				}
+			}
+		}
+		
+		// Clean up category if it was incorrectly parsed
+		if (category && category.startsWith('--category=')) {
+			category = category.substring('--category='.length);
+		}
 		
 		const merge = args.includes('--merge');
 		const listCategories = args.includes('--list') || args.includes('--categories');
