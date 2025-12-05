@@ -20,7 +20,7 @@
 	}
 
 	function openWikipedia() {
-		if (person?.wikipediaUrl) {
+		if (person?.wikipediaUrl && typeof window !== 'undefined') {
 			window.open(person.wikipediaUrl, '_blank');
 		}
 	}
@@ -54,6 +54,8 @@
 	let scrollPosition = 0;
 
 	function scrollRelated(direction: 'left' | 'right') {
+		if (typeof document === 'undefined') return;
+		
 		const container = document.getElementById('related-carousel');
 		if (!container) return;
 		

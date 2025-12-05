@@ -526,6 +526,8 @@
 
 	// Sync with URL hash
 	function syncURL() {
+		if (typeof window === 'undefined') return;
+		
 		const xScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
 		const centerYear = Math.round(xScale.invert(width / 2));
 		const zoom = Math.round((zoomTransform?.k || 1) * 10) / 10;
@@ -623,8 +625,8 @@
 	}
 
 	onMount(() => {
-		setTimeout(loadFromURL, 100);
 		if (typeof window !== 'undefined') {
+			setTimeout(loadFromURL, 100);
 			window.addEventListener('keydown', handleKeyDown);
 		}
 	});

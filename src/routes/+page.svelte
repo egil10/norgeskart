@@ -63,25 +63,29 @@
 			const random = topPeople[Math.floor(Math.random() * topPeople.length)];
 			handlePersonClick(random);
 			
-			// Trigger zoom to this person in Timeline (via URL hash)
+		// Trigger zoom to this person in Timeline (via URL hash)
+		if (typeof window !== 'undefined') {
 			const centerYear = random.birthYear;
 			window.location.hash = `#year=${centerYear}&zoom=5`;
 			
 			// Small delay then reload hash
 			setTimeout(() => {
-				if (typeof window !== 'undefined') {
-					window.dispatchEvent(new HashChangeEvent('hashchange'));
-				}
+				window.dispatchEvent(new HashChangeEvent('hashchange'));
 			}, 100);
+		}
 		}
 	}
 
 	onMount(() => {
-		window.addEventListener('keydown', handleKeyDown);
+		if (typeof window !== 'undefined') {
+			window.addEventListener('keydown', handleKeyDown);
+		}
 	});
 
 	onDestroy(() => {
-		window.removeEventListener('keydown', handleKeyDown);
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('keydown', handleKeyDown);
+		}
 	});
 </script>
 

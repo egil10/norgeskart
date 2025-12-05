@@ -2,7 +2,7 @@
 	import type { Person } from '../types';
 	import { allOccupations } from '../config/occupations';
 	import { getOccupationCategory } from '../config/colors';
-	import Fuse from 'fuse.js';
+	import { onMount } from 'svelte';
 
 	export let people: Person[] = [];
 	export let onFiltered: (filtered: Person[]) => void = () => {};
@@ -18,8 +18,26 @@
 	let minYear = 1500;
 	let maxYear = new Date().getFullYear();
 
-	// Fuse.js for fuzzy search
-	let fuse: Fuse<Person> | null = null;
+	// Fuse.js for fuzzy search (client-side only)
+	let Fuse: any = null;
+	let fuse: any = null;
+
+	// Load Fuse.js on client-side only to avoid SSR issues
+	onMount(async () => {
+		try {
+			const FuseModule = await import('fuse.js');
+			Fuse = FuseModule.default;
+			if (people.length > 0) {
+				fuse = new Fuse(people, {
+					keys: ['name', 'occupations', 'summary'],
+					threshold: 0.4,
+					includeScore: true
+				});
+			}
+		} catch (e) {
+			console.warn('Fuse.js not available, falling back to simple search');
+		}
+	});
 
 	$: {
 		if (people.length > 0) {
@@ -29,8 +47,8 @@
 			if (yearRange[0] < minYear) yearRange = [minYear, yearRange[1]];
 			if (yearRange[1] > maxYear) yearRange = [yearRange[0], maxYear];
 
-			// Initialize Fuse
-			if (!fuse) {
+			// Reinitialize Fuse when people change (client-side only)
+			if (Fuse && !fuse && typeof window !== 'undefined') {
 				fuse = new Fuse(people, {
 					keys: ['name', 'occupations', 'summary'],
 					threshold: 0.4,
@@ -203,16 +221,18 @@
 			<!-- Year Range -->
 			<div>
 				<div class="flex items-center justify-between mb-3">
-					<label class="text-xs font-medium text-gray-300">
+					<div class="text-xs font-medium text-gray-300">
 						Årstall
-					</label>
+					</div>
 					<span class="text-xs text-gray-400">
 						{yearRange[0]} – {yearRange[1]}
 					</span>
 				</div>
 				<div class="space-y-4">
 					<div>
+						<label for="year-from" class="sr-only">Fra år</label>
 						<input
+							id="year-from"
 							type="range"
 							min={minYear}
 							max={maxYear}
@@ -226,7 +246,9 @@
 						</div>
 					</div>
 					<div>
+						<label for="year-to" class="sr-only">Til år</label>
 						<input
+							id="year-to"
 							type="range"
 							min={minYear}
 							max={maxYear}
@@ -244,10 +266,10 @@
 
 			<!-- Occupations -->
 			<div>
-				<label class="block text-xs font-medium text-gray-300 mb-3">
+				<div class="block text-xs font-medium text-gray-300 mb-3">
 					Yrke
-				</label>
-				<div class="space-y-1.5 max-h-64 overflow-y-auto pr-2">
+				</div>
+				<div class="space-y-1.5 max-h-64 overflow-y-auto pr-2" role="group" aria-label="Yrke filtre">
 					{#each allOccupations as occupation}
 						<label class="flex items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors">
 							<input
@@ -270,5 +292,17 @@
 <style>
 	kbd {
 		font-family: ui-monospace, monospace;
+	}
+	
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border-width: 0;
 	}
 </style>
