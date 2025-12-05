@@ -28,7 +28,6 @@ export const occupationMap: Record<string, string> = {
 	graphic: 'artist',
 	author: 'writer',
 	writer: 'writer',
-	poet: 'writer',
 	politician: 'politician',
 	prime: 'politician',
 	footballer: 'athlete',

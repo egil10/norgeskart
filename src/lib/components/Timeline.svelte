@@ -4,7 +4,6 @@
 	import type { Person } from '../types';
 
 	export let people: Person[] = [];
-	export let selectedPerson: Person | null = null;
 	export let onPersonClick: (person: Person) => void = () => {};
 
 	let svg: SVGSVGElement;

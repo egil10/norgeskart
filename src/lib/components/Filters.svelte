@@ -80,10 +80,11 @@
 
 	<!-- Search -->
 	<div class="mb-6">
-		<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+		<label for="search-input" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
 			Søk
 		</label>
 		<input
+			id="search-input"
 			type="text"
 			bind:value={searchQuery}
 			placeholder="Søk etter navn..."
@@ -93,9 +94,9 @@
 
 	<!-- Occupations -->
 	<div class="mb-6">
-		<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+		<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
 			Yrke
-		</label>
+		</div>
 		<div class="space-y-2">
 			{#each allOccupations as occupation}
 				<label class="flex items-center cursor-pointer">
@@ -115,15 +116,16 @@
 
 	<!-- Year Range -->
 	<div class="mb-6">
-		<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+		<div class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
 			Årstall
-		</label>
+		</div>
 		<div class="space-y-3">
 			<div>
-				<label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+				<label for="year-from" class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
 					Fra
 				</label>
 				<input
+					id="year-from"
 					type="number"
 					bind:value={yearRange[0]}
 					min={minYear}
@@ -133,10 +135,11 @@
 				/>
 			</div>
 			<div>
-				<label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+				<label for="year-to" class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
 					Til
 				</label>
 				<input
+					id="year-to"
 					type="number"
 					bind:value={yearRange[1]}
 					min={minYear}

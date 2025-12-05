@@ -40,7 +40,6 @@
 		<div class="flex-1 overflow-hidden">
 			<Timeline
 				people={filteredPeople}
-				{selectedPerson}
 				onPersonClick={handlePersonClick}
 			/>
 		</div>
