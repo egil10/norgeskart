@@ -21,7 +21,7 @@
     const ROW_HEIGHT = 45;
     const BAR_HEIGHT = 30;
     const AXIS_HEIGHT = 40;
-    const INITIAL_VISIBLE_LANES = 15;
+    const INITIAL_VISIBLE_LANES = 30;
     const LOAD_MORE_INCREMENT = 10;
     const currentYear = 2025;
 
@@ -50,6 +50,7 @@
     let baseXScale: ScaleLinear<number, number>;
     let xScale: ScaleLinear<number, number> | null = null;
     let zoomTransform: ZoomTransform = zoomIdentity;
+    let isInitialLoad = true;
 
     // Data State
     type VisiblePerson = Person & { laneIndex: number };
@@ -137,15 +138,26 @@
     });
 
     function updateZoomExtents() {
-        if (!zoom || width === 0) return;
+        if (!zoom || width === 0 || !baseXScale) return;
 
         const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
         const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS;
 
         zoom.scaleExtent([minK, maxK]);
+        
+        // Update translate extent based on current zoom level
+        // This constrains panning so we can't scroll past MIN_YEAR and MAX_YEAR
+        const currentK = zoomTransform?.k || minK;
+        const minYearPixel = baseXScale(MIN_YEAR);
+        const maxYearPixel = baseXScale(MAX_YEAR);
+        
+        // Calculate bounds for current zoom level
+        const minTx = margin.left - minYearPixel * currentK;
+        const maxTx = width - margin.right - maxYearPixel * currentK;
+        
         zoom.translateExtent([
-            [margin.left - 1000, -Infinity],
-            [width - margin.right + 1000, Infinity],
+            [minTx, -Infinity],
+            [maxTx, Infinity],
         ]);
     }
 
@@ -171,9 +183,9 @@
                 const oldK = zoomTransform.k;
                 zoomTransform = event.transform;
 
-                // If Zoom Level (k) changed significantly, RE-LAYOUT lanes.
-                // If only Translation (x, y) changed, just Pan (re-render).
+                // Update translate extents when zoom level changes
                 if (Math.abs(oldK - zoomTransform.k) > 0.001) {
+                    updateZoomExtents();
                     recalculateLayout();
                 } else {
                     updateRenderState();
@@ -182,8 +194,10 @@
 
         updateZoomExtents();
 
-        // Transform to initial "Zoomed Out" state (show 600 years) or reasonable default
-        const initialK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
+        // Transform to initial state - show fewer years initially to get more people visible
+        // Use 400 years instead of 600 to lower the prominence threshold and show more people
+        const initialVisibleYears = 400;
+        const initialK = TOTAL_YEARS / initialVisibleYears;
 
         // Center view roughly on modern times if possible, or 1900
         const centerYear = 1900;
@@ -223,7 +237,28 @@
 
         // 1. Identify all candidates for this Scale
         const currentScale = zoomTransform.rescaleX(baseXScale);
-        const threshold = getProminenceThreshold(zoomTransform.k);
+        let threshold = getProminenceThreshold(zoomTransform.k);
+
+        // On initial load, ensure we show at least 30 people
+        if (isInitialLoad) {
+            // Try to get at least 30 people by lowering threshold if needed
+            let candidates = people.filter((p) => p.prominenceScore >= threshold);
+            
+            // If we have fewer than 30 candidates, lower the threshold
+            if (candidates.length < 30) {
+                // Sort people by prominence score descending
+                const sortedByProminence = [...people].sort(
+                    (a, b) => b.prominenceScore - a.prominenceScore
+                );
+                // Get the 30th person's score (or last person if fewer than 30)
+                const minPeopleToShow = Math.min(30, people.length);
+                if (sortedByProminence.length >= minPeopleToShow) {
+                    threshold = sortedByProminence[minPeopleToShow - 1].prominenceScore;
+                } else {
+                    threshold = 0; // Show all if we have fewer than 30 total
+                }
+            }
+        }
 
         let candidates = people.filter((p) => p.prominenceScore >= threshold);
 
@@ -250,6 +285,11 @@
             layoutPeople.length > 0
                 ? Math.max(...layoutPeople.map((p) => p.laneIndex))
                 : 0;
+
+        // Mark initial load as complete after first layout
+        if (isInitialLoad) {
+            isInitialLoad = false;
+        }
 
         updateRenderState();
     }

@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from "svelte";
     import Timeline from "$lib/components/Timeline.svelte";
     import PersonPanel from "$lib/components/PersonPanel.svelte";
+    import ScrollToTop from "$lib/components/ScrollToTop.svelte";
     import type { Person } from "$lib/types";
     import { allPeople } from "$lib/data/people";
     import type { PageData } from "./$types";
@@ -103,6 +104,9 @@
             </div>
         </div>
     </footer>
+
+    <!-- Scroll to Top Button -->
+    <ScrollToTop />
 </div>
 
 <style>
