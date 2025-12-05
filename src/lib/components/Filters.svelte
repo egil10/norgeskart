@@ -2,20 +2,24 @@
 	import type { Person } from '../types';
 	import { allOccupations } from '../config/occupations';
 	import { getOccupationCategory } from '../config/colors';
+	import Fuse from 'fuse.js';
 
 	export let people: Person[] = [];
 	export let onFiltered: (filtered: Person[]) => void = () => {};
 	export let onClose: () => void = () => {};
 
 	let selectedOccupations: Set<string> = new Set(allOccupations);
-	let yearRange: [number, number] = [800, new Date().getFullYear()];
+	let yearRange: [number, number] = [1500, new Date().getFullYear()];
 	let searchQuery: string = '';
 	let onlyLiving = false;
 	let onlyWithImages = false;
 	let filteredCount = people.length;
 
-	let minYear = 800;
+	let minYear = 1500;
 	let maxYear = new Date().getFullYear();
+
+	// Fuse.js for fuzzy search
+	let fuse: Fuse<Person> | null = null;
 
 	$: {
 		if (people.length > 0) {
@@ -24,6 +28,15 @@
 			maxYear = Math.max(...years, new Date().getFullYear());
 			if (yearRange[0] < minYear) yearRange = [minYear, yearRange[1]];
 			if (yearRange[1] > maxYear) yearRange = [yearRange[0], maxYear];
+
+			// Initialize Fuse
+			if (!fuse) {
+				fuse = new Fuse(people, {
+					keys: ['name', 'occupations', 'summary'],
+					threshold: 0.4,
+					includeScore: true
+				});
+			}
 		}
 	}
 
@@ -46,13 +59,32 @@
 			);
 		});
 
-		if (searchQuery.trim()) {
-			const query = searchQuery.toLowerCase().trim();
-			result = result.filter((person) =>
-				person.name.toLowerCase().includes(query) ||
-				person.occupations.some(occ => occ.toLowerCase().includes(query)) ||
-				person.summary.toLowerCase().includes(query)
-			);
+		// Fuzzy search
+		if (searchQuery.trim() && fuse) {
+			const searchResults = fuse.search(searchQuery);
+			const searchIds = new Set(searchResults.map(r => r.item.id));
+			
+			// Boost prominence of search matches
+			result = result.map(p => {
+				if (searchIds.has(p.id)) {
+					return {
+						...p,
+						prominenceScore: Math.min(100, p.prominenceScore + 20)
+					};
+				}
+				return p;
+			}).filter(p => {
+				// Include if matches search OR was already in result
+				return searchIds.has(p.id) || result.includes(p);
+			});
+			
+			// Sort by search relevance
+			const relevanceMap = new Map(searchResults.map(r => [r.item.id, r.score || 1]));
+			result.sort((a, b) => {
+				const aScore = relevanceMap.get(a.id) || 1;
+				const bScore = relevanceMap.get(b.id) || 1;
+				return aScore - bScore;
+			});
 		}
 
 		if (onlyLiving) {
@@ -103,14 +135,14 @@
 	};
 </script>
 
-<div class="w-72 lg:w-80 h-full bg-white dark:bg-[#0f0f0f] border-r border-gray-200 dark:border-gray-900 flex flex-col shadow-xl">
+<div class="w-72 lg:w-80 h-full bg-black/60 backdrop-blur-xl border-r border-white/10 flex flex-col shadow-2xl">
 	<!-- Header -->
-	<div class="p-6 border-b border-gray-200 dark:border-gray-900">
+	<div class="p-6 border-b border-white/10">
 		<div class="flex items-center justify-between mb-1">
-			<h2 class="text-lg font-semibold text-gray-900 dark:text-white">Filtre</h2>
+			<h2 class="text-lg font-semibold text-white">Filtre</h2>
 			<button
 				onclick={onClose}
-				class="lg:hidden p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+				class="lg:hidden p-1.5 hover:bg-white/10 rounded-lg transition-colors"
 				aria-label="Close filters"
 			>
 				<svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -118,7 +150,7 @@
 				</svg>
 			</button>
 		</div>
-		<p class="text-xs text-gray-500 dark:text-gray-400">
+		<p class="text-xs text-gray-400">
 			{filteredCount.toLocaleString()} av {people.length.toLocaleString()} personer
 		</p>
 	</div>
@@ -128,12 +160,12 @@
 		<div class="p-6 space-y-6">
 			<!-- Search -->
 			<div>
-				<label for="search-input" class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+				<label for="search-input" class="block text-xs font-medium text-gray-300 mb-2">
 					Søk
 				</label>
 				<div class="relative">
 					<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-						<svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
 						</svg>
 					</div>
@@ -142,27 +174,28 @@
 						type="text"
 						bind:value={searchQuery}
 						placeholder="Navn, yrke..."
-						class="block w-full pl-10 pr-3 py-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+						class="block w-full pl-10 pr-3 py-2.5 border border-white/20 rounded-xl bg-black/40 backdrop-blur-sm text-sm text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
 					/>
 				</div>
+				<p class="text-xs text-gray-500 mt-1.5">Trykk <kbd class="px-1.5 py-0.5 bg-white/10 rounded text-xs">/</kbd> for søk</p>
 			</div>
 
 			<!-- Quick Filters -->
 			<div class="space-y-2">
-				<label class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors">
-					<span class="text-sm text-gray-700 dark:text-gray-300">Kun levende</span>
+				<label class="flex items-center justify-between p-3 rounded-xl border border-white/10 hover:bg-white/5 cursor-pointer transition-colors">
+					<span class="text-sm text-gray-300">Kun levende</span>
 					<input
 						type="checkbox"
 						bind:checked={onlyLiving}
-						class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 dark:bg-gray-800 dark:border-gray-700"
+						class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 bg-black/40 border-white/20"
 					/>
 				</label>
-				<label class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors">
-					<span class="text-sm text-gray-700 dark:text-gray-300">Kun med bilder</span>
+				<label class="flex items-center justify-between p-3 rounded-xl border border-white/10 hover:bg-white/5 cursor-pointer transition-colors">
+					<span class="text-sm text-gray-300">Kun med bilder</span>
 					<input
 						type="checkbox"
 						bind:checked={onlyWithImages}
-						class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 dark:bg-gray-800 dark:border-gray-700"
+						class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 bg-black/40 border-white/20"
 					/>
 				</label>
 			</div>
@@ -170,10 +203,10 @@
 			<!-- Year Range -->
 			<div>
 				<div class="flex items-center justify-between mb-3">
-					<label class="text-xs font-medium text-gray-700 dark:text-gray-300">
+					<label class="text-xs font-medium text-gray-300">
 						Årstall
 					</label>
-					<span class="text-xs text-gray-500 dark:text-gray-400">
+					<span class="text-xs text-gray-400">
 						{yearRange[0]} – {yearRange[1]}
 					</span>
 				</div>
@@ -185,9 +218,9 @@
 							max={maxYear}
 							bind:value={yearRange[0]}
 							oninput={(e) => updateYearRange(0, parseInt(e.target.value) || minYear)}
-							class="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-600"
+							class="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-600"
 						/>
-						<div class="flex justify-between text-xs text-gray-400 mt-1">
+						<div class="flex justify-between text-xs text-gray-500 mt-1">
 							<span>{minYear}</span>
 							<span>Fra: {yearRange[0]}</span>
 						</div>
@@ -199,9 +232,9 @@
 							max={maxYear}
 							bind:value={yearRange[1]}
 							oninput={(e) => updateYearRange(1, parseInt(e.target.value) || maxYear)}
-							class="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-600"
+							class="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-600"
 						/>
-						<div class="flex justify-between text-xs text-gray-400 mt-1">
+						<div class="flex justify-between text-xs text-gray-500 mt-1">
 							<span>Til: {yearRange[1]}</span>
 							<span>{maxYear}</span>
 						</div>
@@ -211,19 +244,19 @@
 
 			<!-- Occupations -->
 			<div>
-				<label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-3">
+				<label class="block text-xs font-medium text-gray-300 mb-3">
 					Yrke
 				</label>
 				<div class="space-y-1.5 max-h-64 overflow-y-auto pr-2">
 					{#each allOccupations as occupation}
-						<label class="flex items-center p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors">
+						<label class="flex items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors">
 							<input
 								type="checkbox"
 								checked={selectedOccupations.has(occupation)}
 								onchange={() => toggleOccupation(occupation)}
-								class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 dark:bg-gray-800 dark:border-gray-700 mr-3"
+								class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 focus:ring-2 bg-black/40 border-white/20 mr-3"
 							/>
-							<span class="text-sm text-gray-700 dark:text-gray-300">
+							<span class="text-sm text-gray-300">
 								{occupationLabels[occupation] || occupation}
 							</span>
 						</label>
@@ -233,3 +266,9 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	kbd {
+		font-family: ui-monospace, monospace;
+	}
+</style>

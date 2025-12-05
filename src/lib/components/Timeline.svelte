@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount, onDestroy, afterUpdate } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { spring } from 'svelte/motion';
 	import * as d3 from 'd3';
 	import type { Person } from '../types';
 
@@ -12,26 +13,52 @@
 	let height = 800;
 	let currentYear = new Date().getFullYear();
 
+	const MIN_YEAR = 1500;
+	const MAX_YEAR = 2025;
+	const margin = { top: 80, right: 60, bottom: 100, left: 60 };
+	const densityBarWidth = 40;
+	const JITTER_RANGE = 30;
+
 	let baseXScale: d3.ScaleLinear<number, number>;
 	let zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
 	let g: d3.Selection<SVGGElement, unknown, null, undefined>;
 	let zoomTransform: d3.ZoomTransform = d3.zoomIdentity;
+	let isDragging = false;
+	let hoveredPerson: Person | null = null;
+	let isAltDragging = false;
+	let selectionStart: number | null = null;
+	let selectionEnd: number | null = null;
 
-	const margin = { top: 80, right: 40, bottom: 60, left: 40 };
-	const barHeight = 24;
-	const MIN_PIXELS_PER_PERSON = 3; // Minimum pixels per person before clustering
+	// Jitter map for consistent Y positions
+	const jitterMap = new Map<string, number>();
 
-	interface Cluster {
-		startYear: number;
-		endYear: number;
-		persons: Person[];
-		count: number;
-		y: number;
-		height: number;
+	function getJitterY(personId: string): number {
+		if (!jitterMap.has(personId)) {
+			// Create consistent random offset based on ID
+			const hash = personId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+			jitterMap.set(personId, (hash % (JITTER_RANGE * 2)) - JITTER_RANGE);
+		}
+		return jitterMap.get(personId)!;
+	}
+
+	function zoomThreshold(scale: number): number {
+		// Map zoom scale (k) to prominence threshold
+		// k: 1 (zoomed out) -> threshold 95 (only most famous)
+		// k: 10 (zoomed in) -> threshold 5 (almost everyone)
+		const minK = 0.5;
+		const maxK = 15;
+		const clamped = Math.max(minK, Math.min(maxK, scale));
+		const ratio = (clamped - minK) / (maxK - minK);
+		return Math.round(100 - (ratio * 90)); // 100 to 10
+	}
+
+	function getTopPeople(): Person[] {
+		return [...people]
+			.sort((a, b) => b.prominenceScore - a.prominenceScore)
+			.slice(0, 10);
 	}
 
 	let isInitialized = false;
-	let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(() => {
 		if (!svg || !container) return;
@@ -42,26 +69,13 @@
 		const resizeObserver = new ResizeObserver(() => {
 			updateDimensions();
 			if (isInitialized) {
-				scheduleUpdate();
+				updateChart();
 			}
 		});
 
 		resizeObserver.observe(container);
 		onDestroy(() => resizeObserver.disconnect());
 	});
-
-	afterUpdate(() => {
-		if (isInitialized && svg && people.length > 0) {
-			scheduleUpdate();
-		}
-	});
-
-	function scheduleUpdate() {
-		if (renderTimeout) clearTimeout(renderTimeout);
-		renderTimeout = setTimeout(() => {
-			updateChartData();
-		}, 16);
-	}
 
 	function updateDimensions() {
 		if (!container) return;
@@ -71,176 +85,116 @@
 	function initD3() {
 		if (!svg || !people.length) return;
 
-		const allYears = people.flatMap(p => [p.birthYear, p.deathYear || currentYear]);
-		const minYear = Math.min(...allYears) - 5;
-		const maxYear = Math.max(...allYears) + 5;
-
 		baseXScale = d3
 			.scaleLinear()
-			.domain([minYear, maxYear])
-			.range([margin.left, width - margin.right]);
+			.domain([MIN_YEAR, MAX_YEAR])
+			.range([margin.left + densityBarWidth, width - margin.right]);
 
 		if (!isInitialized) {
 			d3.select(svg).selectAll('*').remove();
 			g = d3.select(svg).append('g');
-			
-			g.append('defs');
-			
-			g.append('g')
-				.attr('class', 'x-axis')
+
+			// Create groups
+			g.append('g').attr('class', 'density-bars');
+			g.append('g').attr('class', 'dots');
+			g.append('g').attr('class', 'labels');
+			g.append('g').attr('class', 'x-axis')
 				.attr('transform', `translate(0, ${height - margin.bottom})`);
+			g.append('g').attr('class', 'grid-lines');
 
-			g.append('g')
-				.attr('class', 'grid-lines');
-
+			// Zoom behavior
 			zoom = d3
 				.zoom<SVGSVGElement, unknown>()
-				.scaleExtent([0.05, 50])
+				.scaleExtent([0.5, 20])
 				.translateExtent([
-					[-margin.left, -margin.top],
+					[-margin.left - densityBarWidth, -margin.top],
 					[width - margin.right, height - margin.bottom]
 				])
+				.on('start', (event) => {
+					isDragging = true;
+					// Check if Alt key is pressed for selection mode
+					if (event.sourceEvent && (event.sourceEvent.altKey || event.sourceEvent.metaKey)) {
+						isAltDragging = true;
+						selectionStart = event.sourceEvent.offsetX;
+					}
+				})
 				.on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+					if (isAltDragging && event.sourceEvent) {
+						selectionEnd = event.sourceEvent.offsetX;
+					}
 					zoomTransform = event.transform;
-					scheduleUpdate();
+					updateChart();
+				})
+				.on('end', () => {
+					isDragging = false;
+					if (isAltDragging) {
+						isAltDragging = false;
+						selectionStart = null;
+						selectionEnd = null;
+					}
 				});
 
 			d3.select(svg).call(zoom);
 			isInitialized = true;
 		}
 
-		updateChartData();
+		updateChart();
 	}
 
-	function createClusters(
-		visiblePeople: Person[],
-		xScale: d3.ScaleLinear<number, number>
-	): Cluster[] {
-		if (visiblePeople.length === 0) return [];
+	function getVisiblePeople(): Person[] {
+		if (!people.length) return [];
 
-		const zoomLevel = zoomTransform?.k || 1;
-		const pixelsPerPerson = (height - margin.top - margin.bottom) / visiblePeople.length;
-		
-		// If we have enough space, don't cluster
-		if (pixelsPerPerson >= MIN_PIXELS_PER_PERSON) {
-			return visiblePeople.map((person, i) => ({
-				startYear: person.birthYear,
-				endYear: person.deathYear || currentYear,
-				persons: [person],
-				count: 1,
-				y: margin.top + (i * pixelsPerPerson),
-				height: pixelsPerPerson * 0.8
-			}));
-		}
+		const threshold = zoomThreshold(zoomTransform?.k || 1);
+		const top = getTopPeople();
 
-		// Cluster by time periods
-		const yearSpan = Math.max(...visiblePeople.map(p => p.deathYear || currentYear)) - 
-		                Math.min(...visiblePeople.map(p => p.birthYear));
-		const clusterWindow = Math.max(50, yearSpan / Math.max(1, (height - margin.top - margin.bottom) / MIN_PIXELS_PER_PERSON));
+		// Always include top 10
+		const topIds = new Set(top.map(p => p.id));
 
-		const clusters: Cluster[] = [];
-		const sortedPeople = [...visiblePeople].sort((a, b) => a.birthYear - b.birthYear);
+		// Filter by prominence and get visible range
+		const xScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
+		const visibleStart = xScale.invert(-margin.left - densityBarWidth);
+		const visibleEnd = xScale.invert(width);
 
-		let currentCluster: Person[] = [];
-		let clusterStartYear = sortedPeople[0]?.birthYear || 0;
-
-		for (const person of sortedPeople) {
-			if (currentCluster.length === 0 || person.birthYear - clusterStartYear < clusterWindow) {
-				currentCluster.push(person);
-				clusterStartYear = Math.min(clusterStartYear, person.birthYear);
-			} else {
-				// Finalize current cluster
-				const endYear = Math.max(...currentCluster.map(p => p.deathYear || currentYear));
-				clusters.push({
-					startYear: clusterStartYear,
-					endYear,
-					persons: currentCluster,
-					count: currentCluster.length,
-					y: 0, // Will be set later
-					height: 0
-				});
-
-				// Start new cluster
-				currentCluster = [person];
-				clusterStartYear = person.birthYear;
-			}
-		}
-
-		// Add last cluster
-		if (currentCluster.length > 0) {
-			const endYear = Math.max(...currentCluster.map(p => p.deathYear || currentYear));
-			clusters.push({
-				startYear: clusterStartYear,
-				endYear,
-				persons: currentCluster,
-				count: currentCluster.length,
-				y: 0,
-				height: 0
-			});
-		}
-
-		// Calculate y positions
-		const clusterHeight = (height - margin.top - margin.bottom) / clusters.length;
-		clusters.forEach((cluster, i) => {
-			cluster.y = margin.top + (i * clusterHeight);
-			cluster.height = clusterHeight * 0.8;
+		const filtered = people.filter(p => {
+			const endYear = p.deathYear || currentYear;
+			const isVisibleInRange = p.birthYear <= visibleEnd && endYear >= visibleStart;
+			const meetsThreshold = topIds.has(p.id) || p.prominenceScore >= threshold;
+			return isVisibleInRange && meetsThreshold;
 		});
 
-		return clusters;
+		return filtered;
 	}
 
-	function getVisiblePeople(xScale: d3.ScaleLinear<number, number>): Person[] {
-		const visibleStart = xScale.invert(-margin.left);
-		const visibleEnd = xScale.invert(width + margin.right);
+	function calculateDensity(): Array<{ year: number; births: number; deaths: number }> {
+		const density: Array<{ year: number; births: number; deaths: number }> = [];
 		
-		// Binary search for efficiency
-		let start = 0;
-		let end = people.length - 1;
-
-		// Find start index
-		while (start < end) {
-			const mid = Math.floor((start + end) / 2);
-			const midEndYear = people[mid].deathYear || currentYear;
-			if (midEndYear < visibleStart) {
-				start = mid + 1;
-			} else {
-				end = mid;
-			}
+		// Calculate by decade
+		for (let year = MIN_YEAR; year <= MAX_YEAR; year += 10) {
+			const decadeStart = Math.floor(year / 10) * 10;
+			const births = people.filter(p => Math.floor(p.birthYear / 10) * 10 === decadeStart).length;
+			const deaths = people.filter(p => 
+				p.deathYear && Math.floor(p.deathYear / 10) * 10 === decadeStart
+			).length;
+			density.push({ year: decadeStart, births, deaths });
 		}
-		const startIdx = Math.max(0, start - 50);
-
-		// Find end index
-		end = people.length - 1;
-		while (start < end) {
-			const mid = Math.ceil((start + end) / 2);
-			if (people[mid].birthYear > visibleEnd) {
-				end = mid - 1;
-			} else {
-				start = mid;
-			}
-		}
-		const endIdx = Math.min(people.length - 1, end + 50);
-
-		return people.slice(startIdx, endIdx + 1);
+		
+		return density;
 	}
 
-	function updateChartData() {
+	function updateChart() {
 		if (!g || !people.length || !baseXScale) return;
 
 		const xScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
+		const visiblePeople = getVisiblePeople();
 		const zoomLevel = zoomTransform?.k || 1;
-
-		// Get visible people
-		const visiblePeople = getVisiblePeople(xScale);
-		
-		// Create clusters or individual items based on zoom
-		const clusters = createClusters(visiblePeople, xScale);
-		const shouldCluster = clusters[0]?.count > 1 || false;
+		const showLabels = zoomLevel > 3;
+		const topPeople = getTopPeople();
+		const topIds = new Set(topPeople.map(p => p.id));
 
 		// Update x-axis
 		const xAxis = d3.axisBottom(xScale)
 			.tickFormat(d3.format('d'))
-			.ticks(Math.min(20, width / 80));
+			.ticks(Math.min(30, width / 60));
 		
 		g.select('.x-axis')
 			.transition()
@@ -249,175 +203,260 @@
 
 		// Grid lines
 		const gridLines = g.select('.grid-lines')
-			.selectAll('.grid-line')
-			.data(xScale.ticks(10));
+			.selectAll<SVGLineElement, number>('.grid-line')
+			.data(xScale.ticks(20));
 
 		gridLines.exit().remove();
 
 		gridLines.enter()
 			.append('line')
 			.attr('class', 'grid-line')
-			.merge(gridLines as any)
+			.merge(gridLines)
 			.attr('x1', d => xScale(d))
 			.attr('x2', d => xScale(d))
 			.attr('y1', margin.top)
 			.attr('y2', height - margin.bottom)
 			.attr('stroke', 'currentColor')
-			.attr('stroke-opacity', 0.1)
+			.attr('stroke-opacity', 0.05)
 			.attr('stroke-width', 1);
 
-		if (shouldCluster) {
-			// Render clusters
-			const clusterGroups = g.selectAll<SVGGElement, Cluster>('.cluster-group')
-				.data(clusters, (d, i) => `cluster-${i}`);
+		// Density bars (vertical bars on left side, aligned to timeline)
+		const density = calculateDensity();
+		const maxDensity = Math.max(1, ...density.map(d => d.births + d.deaths));
+		const densityScale = d3.scaleLinear()
+			.domain([0, maxDensity])
+			.range([0, 60]); // Max bar height
 
-			clusterGroups.exit().remove();
+		const densityBars = g.select('.density-bars')
+			.selectAll<SVGRectElement, typeof density[0]>('.density-bar')
+			.data(density, d => d.year.toString());
 
-			const clusterEnter = clusterGroups.enter()
-				.append('g')
-				.attr('class', 'cluster-group');
+		densityBars.exit().remove();
 
-			const clusterMerged = clusterEnter.merge(clusterGroups as any);
+		const densityEnter = densityBars.enter()
+			.append('rect')
+			.attr('class', 'density-bar');
 
-			// Cluster bars
-			clusterMerged.selectAll<SVGRectElement, Cluster>('.cluster-bar')
-				.data(d => [d])
-				.join(
-					enter => enter.append('rect').attr('class', 'cluster-bar'),
-					update => update,
-					exit => exit.remove()
-				)
-				.attr('x', d => xScale(d.startYear))
-				.attr('y', d => d.y)
-				.attr('width', d => Math.max(xScale(d.endYear) - xScale(d.startYear), 4))
-				.attr('height', d => d.height)
-				.attr('fill', '#3b82f6')
-				.attr('opacity', 0.6)
-				.attr('rx', 8)
-				.attr('cursor', 'pointer')
-				.on('click', (event, d) => {
-					if (d.persons.length === 1) {
-						onPersonClick(d.persons[0]);
-					}
-				})
-				.on('mouseenter', function (event, d) {
-					d3.select(this).attr('opacity', 0.8);
-					showClusterTooltip(event, d);
-				})
-				.on('mouseleave', function () {
-					d3.select(this).attr('opacity', 0.6);
-					hideTooltip();
-				});
+		densityEnter.merge(densityBars as any)
+			.attr('x', densityBarWidth - 12)
+			.attr('y', d => {
+				// Position at timeline center, offset by bar height
+				const decadeX = xScale(d.year);
+				const centerY = (height - margin.top - margin.bottom) / 2 + margin.top;
+				const barHeight = densityScale(d.births + d.deaths);
+				return centerY - barHeight / 2;
+			})
+			.attr('width', 6)
+			.attr('height', d => densityScale(d.births + d.deaths))
+			.attr('fill', '#3b82f6')
+			.attr('opacity', 0.5)
+			.attr('rx', 3);
 
-			// Cluster labels
-			clusterMerged.selectAll<SVGTextElement, Cluster>('.cluster-label')
-				.data(d => [d])
-				.join(
-					enter => enter.append('text').attr('class', 'cluster-label'),
-					update => update,
-					exit => exit.remove()
-				)
-				.attr('x', d => xScale(d.startYear) + 8)
-				.attr('y', d => d.y + d.height / 2)
-				.attr('dy', '0.35em')
-				.attr('fill', 'white')
-				.attr('font-size', '11px')
-				.attr('font-weight', '600')
-				.text(d => `${d.count} personer`)
-				.attr('pointer-events', 'none');
-		} else {
-			// Render individual items
-			g.selectAll('.cluster-group').remove();
+		// Density heatmap (horizontal bar above timeline)
+		const heatmapData = density.map(d => ({
+			year: d.year,
+			intensity: (d.births + d.deaths) / maxDensity
+		}));
 
-			const yScale = d3.scaleBand()
-				.domain(clusters.map((_, i) => i.toString()))
-				.range([margin.top, height - margin.bottom])
-				.padding(0.1);
+		const heatmap = g.select('.heatmap').empty()
+			? g.append('g').attr('class', 'heatmap')
+			: g.select('.heatmap');
 
-			const bars = g.selectAll<SVGGElement, Cluster>('.person-bar')
-				.data(clusters, (d, i) => d.persons[0]?.id || `person-${i}`);
+		const heatmapRects = heatmap
+			.selectAll<SVGRectElement, typeof heatmapData[0]>('.heatmap-bar')
+			.data(heatmapData, d => d.year.toString());
 
-			bars.exit().remove();
+		heatmapRects.exit().remove();
 
-			const barsEnter = bars.enter()
-				.append('g')
-				.attr('class', 'person-bar')
-				.attr('transform', (_, i) => `translate(0, ${yScale(i.toString()) || 0})`);
+		const heatmapEnter = heatmapRects.enter()
+			.append('rect')
+			.attr('class', 'heatmap-bar');
 
-			// Individual bars
-			barsEnter.append('rect')
-				.attr('class', 'bar')
-				.merge(bars.select('.bar') as any)
-				.attr('x', d => xScale(d.startYear))
-				.attr('y', 0)
-				.attr('height', barHeight)
-				.attr('width', d => Math.max(xScale(d.endYear) - xScale(d.startYear), 2))
-				.attr('fill', d => d.persons[0]?.color || '#6b7280')
-				.attr('rx', 6)
-				.attr('cursor', 'pointer')
-				.on('click', (event, d) => onPersonClick(d.persons[0]))
-				.on('mouseenter', function (event, d) {
-					d3.select(this).attr('opacity', 0.85);
-					showTooltip(event, d.persons[0]);
-				})
-				.on('mouseleave', function () {
-					d3.select(this).attr('opacity', 1);
-					hideTooltip();
-				});
+		heatmapEnter.merge(heatmapRects as any)
+			.attr('x', d => xScale(d.year))
+			.attr('y', margin.top - 30)
+			.attr('width', Math.max(2, (xScale(MAX_YEAR) - xScale(MIN_YEAR)) / heatmapData.length))
+			.attr('height', 8)
+			.attr('fill', d => d3.interpolateViridis(d.intensity))
+			.attr('opacity', 0.6)
+			.attr('rx', 2);
 
-			// Labels (only when zoomed enough)
-			if (zoomLevel > 1) {
-				barsEnter.append('text')
-					.attr('class', 'bar-label')
-					.merge(bars.select('.bar-label') as any)
-					.attr('x', d => xScale(d.startYear) + 10)
-					.attr('y', barHeight / 2)
-					.attr('dy', '0.35em')
-					.attr('fill', 'white')
-					.attr('font-size', '12px')
-					.attr('font-weight', '500')
-					.text(d => d.persons[0]?.name || '')
-					.attr('pointer-events', 'none');
+		// Person dots
+		const centerY = (height - margin.top - margin.bottom) / 2 + margin.top;
+		const dots = g.select('.dots')
+			.selectAll<SVGCircleElement, Person>('.person-dot')
+			.data(visiblePeople, d => d.id);
+
+		dots.exit()
+			.transition()
+			.duration(200)
+			.attr('opacity', 0)
+			.attr('r', 0)
+			.remove();
+
+		// Check if person is in selection range
+		const isInSelection = (person: Person): boolean => {
+			if (!isAltDragging || selectionStart === null || selectionEnd === null) return false;
+			const startYear = Math.round(xScale.invert(selectionStart));
+			const endYear = Math.round(xScale.invert(selectionEnd));
+			const minYear = Math.min(startYear, endYear);
+			const maxYear = Math.max(startYear, endYear);
+			const personEndYear = person.deathYear || currentYear;
+			return person.birthYear <= maxYear && personEndYear >= minYear;
+		};
+
+		const dotsEnter = dots.enter()
+			.append('circle')
+			.attr('class', 'person-dot')
+			.attr('opacity', 0)
+			.attr('r', 0);
+
+		dotsEnter.merge(dots as any)
+			.transition()
+			.duration(300)
+			.attr('cx', d => xScale(d.birthYear))
+			.attr('cy', centerY + getJitterY(d.id))
+			.attr('r', d => {
+				const inSelection = isInSelection(d);
+				return inSelection ? (topIds.has(d.id) ? 10 : 7) : (topIds.has(d.id) ? 8 : 5);
+			})
+			.attr('fill', d => d.color)
+			.attr('opacity', d => {
+				if (hoveredPerson?.id === d.id) return 1;
+				if (isInSelection(d)) return 1;
+				return 0.8;
+			})
+			.attr('stroke', d => {
+				if (isInSelection(d)) return '#ffff00';
+				return topIds.has(d.id) ? 'white' : 'rgba(255,255,255,0.5)';
+			})
+			.attr('stroke-width', d => {
+				if (isInSelection(d)) return 3;
+				return topIds.has(d.id) ? 2 : 1;
+			})
+			.attr('cursor', 'pointer')
+			.style('filter', d => {
+				if (hoveredPerson?.id === d.id) return 'drop-shadow(0 0 8px ' + d.color + ')';
+				if (isInSelection(d)) return 'drop-shadow(0 0 12px #ffff00)';
+				return 'none';
+			})
+			.on('click', (event, d) => {
+				event.stopPropagation();
+				onPersonClick(d);
+			})
+			.on('mouseenter', (event, d) => {
+				hoveredPerson = d;
+				d3.select(event.currentTarget)
+					.attr('opacity', 1)
+					.transition()
+					.duration(150)
+					.attr('r', topIds.has(d.id) ? 10 : 7);
+				showTooltip(event, d);
+			})
+			.on('mouseleave', (event) => {
+				hoveredPerson = null;
+				d3.select(event.currentTarget)
+					.attr('opacity', 0.8)
+					.transition()
+					.duration(150)
+					.attr('r', topIds.has(event.currentTarget.__data__.id) ? 8 : 5);
+				hideTooltip();
+			})
+			.on('mousemove', (event, d) => {
+				showTooltip(event, d);
+			});
+
+		// Labels (top people always, others when zoomed)
+		const labels = g.select('.labels')
+			.selectAll<SVGTextElement, Person>('.person-label')
+			.data(visiblePeople.filter(p => topIds.has(p.id) || showLabels), d => d.id);
+
+		labels.exit().remove();
+
+		const labelsEnter = labels.enter()
+			.append('text')
+			.attr('class', 'person-label')
+			.attr('text-anchor', 'start')
+			.attr('pointer-events', 'none');
+
+		labelsEnter.merge(labels as any)
+			.attr('x', d => xScale(d.birthYear) + (topIds.has(d.id) ? 10 : 8))
+			.attr('y', d => centerY + getJitterY(d.id) - 10)
+			.attr('fill', 'white')
+			.attr('font-size', d => topIds.has(d.id) ? '13px' : '11px')
+			.attr('font-weight', d => topIds.has(d.id) ? '600' : '500')
+			.style('paint-order', 'stroke')
+			.style('stroke', 'rgba(0,0,0,0.6)')
+			.style('stroke-width', '3px')
+			.style('stroke-linejoin', 'round')
+			.text(d => d.name);
+
+		// Selection highlight (Alt-drag)
+		const selection = g.select('.selection');
+		if (isAltDragging && selectionStart !== null && selectionEnd !== null && baseXScale) {
+			const xScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
+			const startYear = Math.round(xScale.invert(selectionStart));
+			const endYear = Math.round(xScale.invert(selectionEnd));
+			const minYear = Math.min(startYear, endYear);
+			const maxYear = Math.max(startYear, endYear);
+			
+			if (selection.empty()) {
+				g.append('rect').attr('class', 'selection');
 			}
+			
+			selection
+				.attr('x', xScale(minYear))
+				.attr('y', margin.top)
+				.attr('width', xScale(maxYear) - xScale(minYear))
+				.attr('height', height - margin.top - margin.bottom)
+				.attr('fill', 'rgba(59, 130, 246, 0.2)')
+				.attr('stroke', '#3b82f6')
+				.attr('stroke-width', 2)
+				.attr('stroke-dasharray', '5,5');
+		} else {
+			selection.remove();
 		}
 
 		// Update zoom indicator
-		updateZoomIndicator(zoomLevel, shouldCluster);
+		updateZoomIndicator(zoomLevel);
 	}
 
-	function updateZoomIndicator(zoomLevel: number, isClustered: boolean) {
+	function updateZoomIndicator(zoomLevel: number) {
+		if (!g) return;
+		
 		let indicator = g.select('.zoom-indicator');
 		if (indicator.empty()) {
 			indicator = g.append('g').attr('class', 'zoom-indicator');
 			indicator.append('rect')
 				.attr('class', 'zoom-indicator-bg')
-				.attr('rx', 8)
-				.attr('fill', 'rgba(255, 255, 255, 0.95)')
-				.attr('stroke', '#e5e7eb');
+				.attr('rx', 12)
+				.attr('fill', 'rgba(0,0,0,0.7)');
 			indicator.append('text')
 				.attr('class', 'zoom-indicator-text')
-				.attr('x', 10)
-				.attr('y', 20)
+				.attr('x', 12)
+				.attr('y', 22)
 				.attr('font-size', '12px')
-				.attr('fill', '#374151');
+				.attr('fill', 'white')
+				.attr('font-weight', '500');
 		}
 
-		const text = isClustered 
-			? `Zoom inn for detaljer • ${people.length.toLocaleString()} personer totalt`
-			: `${Math.round(zoomLevel * 100)}% zoom`;
+		const threshold = zoomThreshold(zoomLevel);
+		const visibleCount = getVisiblePeople().length;
+		const text = `${visibleCount.toLocaleString()} personer • Prominence ≥ ${threshold}`;
 
 		indicator.select('.zoom-indicator-text').text(text);
 		
-		const bbox = (indicator.select('.zoom-indicator-text').node() as SVGTextElement)?.getBBox();
+		const textNode = indicator.select('.zoom-indicator-text').node() as SVGTextElement;
+		const bbox = textNode?.getBBox();
 		if (bbox) {
 			indicator.select('.zoom-indicator-bg')
 				.attr('x', 0)
 				.attr('y', 0)
-				.attr('width', bbox.width + 20)
-				.attr('height', bbox.height + 10);
+				.attr('width', bbox.width + 24)
+				.attr('height', bbox.height + 16);
+			
+			indicator.attr('transform', `translate(${width - bbox.width - 54}, 20)`);
 		}
-
-		indicator.attr('transform', `translate(${width - (bbox?.width || 200) - 30}, 20)`);
 	}
 
 	function showTooltip(event: MouseEvent, person: Person) {
@@ -427,96 +466,250 @@
 
 		tooltip
 			.style('opacity', 1)
-			.style('left', event.pageX + 10 + 'px')
+			.style('left', event.pageX + 15 + 'px')
 			.style('top', event.pageY - 10 + 'px')
 			.html(`
 				<div class="font-semibold text-sm">${person.name}</div>
-				<div class="text-xs text-gray-400 mt-1">${person.birthYear}${person.deathYear ? `–${person.deathYear}` : '–'}</div>
-			`);
-	}
-
-	function showClusterTooltip(event: MouseEvent, cluster: Cluster) {
-		const tooltip = d3.select('body').select('.tooltip').empty()
-			? d3.select('body').append('div').attr('class', 'tooltip')
-			: d3.select('body').select('.tooltip');
-
-		const yearRange = cluster.startYear === cluster.endYear 
-			? cluster.startYear.toString()
-			: `${cluster.startYear}–${cluster.endYear}`;
-
-		tooltip
-			.style('opacity', 1)
-			.style('left', event.pageX + 10 + 'px')
-			.style('top', event.pageY - 10 + 'px')
-			.html(`
-				<div class="font-semibold text-sm">${cluster.count} personer</div>
-				<div class="text-xs text-gray-400 mt-1">${yearRange}</div>
-				<div class="text-xs text-gray-500 mt-1">Zoom inn for detaljer</div>
+				<div class="text-xs text-gray-300 mt-0.5">${person.birthYear}${person.deathYear ? `–${person.deathYear}` : '–'}</div>
+				<div class="text-xs text-gray-400 mt-1">${person.occupations.slice(0, 2).join(', ')}</div>
 			`);
 	}
 
 	function hideTooltip() {
 		d3.select('.tooltip').style('opacity', 0);
 	}
+
+	function handleZoomIn() {
+		if (!svg || !zoom) return;
+		
+		const centerX = width / 2;
+		const centerY = height / 2;
+		const currentK = zoomTransform?.k || 1;
+		const newK = currentK * 1.5;
+		
+		// Zoom centered on screen center
+		const newTransform = (zoomTransform || d3.zoomIdentity)
+			.scale(newK);
+		
+		d3.select(svg)
+			.transition()
+			.duration(300)
+			.call(zoom.scaleBy as any, 1.5);
+	}
+
+	function handleZoomOut() {
+		if (!svg || !zoom) return;
+		
+		const currentK = zoomTransform?.k || 1;
+		const newK = Math.max(0.5, currentK / 1.5);
+		
+		d3.select(svg)
+			.transition()
+			.duration(300)
+			.call(zoom.scaleBy as any, 1/1.5);
+	}
+
+	function handleGoToToday() {
+		const todayX = baseXScale(currentYear);
+		const centerX = width / 2;
+		const translateX = centerX - todayX;
+		
+		const newTransform = d3.zoomIdentity
+			.translate(translateX, 0)
+			.scale(zoomTransform?.k || 1);
+		
+		d3.select(svg)
+			.transition()
+			.duration(500)
+			.call(zoom.transform as any, newTransform);
+	}
+
+	// Sync with URL hash
+	function syncURL() {
+		const xScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
+		const centerYear = Math.round(xScale.invert(width / 2));
+		const zoom = Math.round((zoomTransform?.k || 1) * 10) / 10;
+		
+		const hash = `#year=${centerYear}&zoom=${zoom}`;
+		if (window.location.hash !== hash) {
+			window.history.replaceState(null, '', hash);
+		}
+	}
+
+	function loadFromURL() {
+		if (typeof window === 'undefined') return;
+		
+		const hash = window.location.hash;
+		if (!hash) return;
+		
+		const params = new URLSearchParams(hash.substring(1));
+		const year = params.get('year');
+		const zoom = params.get('zoom');
+		
+		if (year && zoom && isInitialized) {
+			const targetYear = parseInt(year, 10);
+			const targetZoom = parseFloat(zoom);
+			const targetX = baseXScale(targetYear);
+			const centerX = width / 2;
+			const translateX = centerX - targetX * targetZoom;
+			
+			const newTransform = d3.zoomIdentity
+				.translate(translateX, 0)
+				.scale(targetZoom);
+			
+			d3.select(svg)
+				.transition()
+				.duration(0)
+				.call(zoom.transform as any, newTransform);
+		}
+	}
+
+	$: if (isInitialized && people.length > 0) {
+		updateChart();
+		syncURL();
+	}
+
+	// Keyboard shortcuts
+	function handleKeyDown(event: KeyboardEvent) {
+		if (
+			event.target instanceof HTMLInputElement ||
+			event.target instanceof HTMLTextAreaElement ||
+			event.ctrlKey ||
+			event.metaKey
+		) {
+			return;
+		}
+
+		const xScale = zoomTransform ? zoomTransform.rescaleX(baseXScale) : baseXScale;
+		const centerYear = Math.round(xScale.invert(width / 2));
+
+		// Arrow keys: navigate by decade
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			const newYear = Math.max(MIN_YEAR, centerYear - 10);
+			const newX = baseXScale(newYear);
+			const centerX = width / 2;
+			const translateX = centerX - newX * (zoomTransform?.k || 1);
+			const newTransform = d3.zoomIdentity
+				.translate(translateX, 0)
+				.scale(zoomTransform?.k || 1);
+			d3.select(svg)
+				.transition()
+				.duration(200)
+				.call(zoom.transform as any, newTransform);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			const newYear = Math.min(MAX_YEAR, centerYear + 10);
+			const newX = baseXScale(newYear);
+			const centerX = width / 2;
+			const translateX = centerX - newX * (zoomTransform?.k || 1);
+			const newTransform = d3.zoomIdentity
+				.translate(translateX, 0)
+				.scale(zoomTransform?.k || 1);
+			d3.select(svg)
+				.transition()
+				.duration(200)
+				.call(zoom.transform as any, newTransform);
+		}
+
+		// +/- for zoom
+		if (event.key === '+' || event.key === '=') {
+			event.preventDefault();
+			handleZoomIn();
+		} else if (event.key === '-' || event.key === '_') {
+			event.preventDefault();
+			handleZoomOut();
+		}
+	}
+
+	onMount(() => {
+		setTimeout(loadFromURL, 100);
+		if (typeof window !== 'undefined') {
+			window.addEventListener('keydown', handleKeyDown);
+		}
+	});
+
+	onDestroy(() => {
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('keydown', handleKeyDown);
+		}
+	});
 </script>
 
-<div bind:this={container} class="w-full h-full relative">
+<div bind:this={container} class="w-full h-full relative bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
 	<svg
 		bind:this={svg}
 		class="w-full timeline-svg"
+		class:grabbing={isDragging}
 		style="height: {height}px;"
 	></svg>
+
+	<!-- Controls -->
+	<div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/60 backdrop-blur-xl px-4 py-3 rounded-2xl border border-white/10 shadow-2xl">
+		<button
+			onclick={handleZoomOut}
+			class="p-2.5 hover:bg-white/10 rounded-xl transition-all hover:scale-110"
+			aria-label="Zoom out"
+		>
+			<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"></path>
+			</svg>
+		</button>
+		<button
+			onclick={handleZoomIn}
+			class="p-2.5 hover:bg-white/10 rounded-xl transition-all hover:scale-110"
+			aria-label="Zoom in"
+		>
+			<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"></path>
+			</svg>
+		</button>
+		<div class="w-px h-6 bg-white/20"></div>
+		<button
+			onclick={handleGoToToday}
+			class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-medium text-sm"
+		>
+			I dag
+		</button>
+	</div>
 </div>
 
 <style>
 	:global(.timeline-svg) {
 		cursor: grab;
-		background: transparent;
+		user-select: none;
 	}
 
-	:global(.timeline-svg:active) {
+	:global(.timeline-svg.grabbing) {
 		cursor: grabbing;
 	}
 
 	:global(.x-axis text) {
-		fill: #6b7280;
+		fill: rgba(255, 255, 255, 0.7);
 		font-size: 11px;
 		font-weight: 500;
 	}
 
-	:global(.dark .x-axis text) {
-		fill: #9ca3af;
-	}
-
 	:global(.x-axis path),
 	:global(.x-axis line) {
-		stroke: #e5e7eb;
+		stroke: rgba(255, 255, 255, 0.2);
 		stroke-width: 1.5;
-	}
-
-	:global(.dark .x-axis path),
-	:global(.dark .x-axis line) {
-		stroke: #374151;
 	}
 
 	:global(.tooltip) {
 		position: absolute;
 		padding: 10px 14px;
-		background: rgba(17, 24, 39, 0.98);
-		backdrop-filter: blur(8px);
+		background: rgba(0, 0, 0, 0.95);
+		backdrop-filter: blur(12px);
 		color: white;
-		border-radius: 8px;
+		border-radius: 10px;
 		pointer-events: none;
 		font-size: 13px;
-		box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 		z-index: 1000;
 		opacity: 0;
-		transition: opacity 0.15s;
+		transition: opacity 0.2s;
 		min-width: 150px;
 		border: 1px solid rgba(255, 255, 255, 0.1);
-	}
-
-	:global(.dark .tooltip) {
-		background: rgba(31, 41, 55, 0.98);
 	}
 </style>
