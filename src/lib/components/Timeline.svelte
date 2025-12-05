@@ -6,125 +6,129 @@
     export let people: Person[] = [];
     export let onPersonClick: (person: Person) => void = () => {};
 
-    let svg: SVGSVGElement;
-    let container: HTMLDivElement;
-    let gElement: SVGGElement;
+    // Elements
+    let viewport: HTMLDivElement;
+    let mainSvg: SVGSVGElement;
+    let mainGElement: SVGGElement;
+
+    let axisContainer: HTMLDivElement;
+    let axisSvg: SVGSVGElement;
+    let axisGElement: SVGGElement;
+
+    // Dimensions
     let width = 0;
     let height = 0; // Viewport height
+    const AXIS_HEIGHT = 40;
     const currentYear = 2025;
 
-    const MIN_YEAR = 800;
-    const MAX_YEAR = 2025;
-    const ROW_HEIGHT = 32;
+    const MIN_YEAR = 700;
+    const MAX_YEAR = 2026;
+    const ROW_HEIGHT = 36; // Slightly taller for better readability
     const BAR_HEIGHT = 28;
-    const margin = { top: 50, right: 80, bottom: 60, left: 150 };
+    // Split margins
+    const margin = { top: 20, right: 80, bottom: 20, left: 150 }; // For main content
+    const axisMargin = { top: 0, right: 80, bottom: 0, left: 150 }; // For axis
 
     let baseXScale: d3.ScaleLinear<number, number>;
     let zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
-    let g: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
+
+    // Selections
+    let mainG: d3.Selection<SVGGElement, unknown, null, undefined> | null =
+        null;
+    let axisG: d3.Selection<SVGGElement, unknown, null, undefined> | null =
+        null;
+
     let zoomTransform: d3.ZoomTransform = d3.zoomIdentity;
     let hoveredPerson: Person | null = null;
-
-    // Smart filtering based on zoom level
-    function getProminenceThreshold(zoomScale: number): number {
-        const minK = 1;
-        const maxK = 20;
-        const clamped = Math.max(minK, Math.min(maxK, zoomScale));
-        const ratio = (clamped - minK) / (maxK - minK);
-        // At zoom 1, threshold 80. At zoom 20, threshold 0.
-        return Math.round(80 - ratio * 80);
-    }
 
     function getVisiblePeople(
         people: Person[],
         zoomTransform: d3.ZoomTransform,
         width: number,
+        height: number,
     ): Person[] {
-        if (people.length === 0 || !baseXScale) return [];
+        if (people.length === 0 || !baseXScale || height === 0) return [];
 
-        const zoomScale = zoomTransform.k;
-        const threshold = getProminenceThreshold(zoomScale);
-
-        // 1. Filter by prominence
-        let filtered = people.filter((p) => p.prominenceScore >= threshold);
-
-        // 2. Filter by Time Range (Visible Domain)
         const currentXScale = zoomTransform.rescaleX(baseXScale);
         const [minYear, maxYear] = currentXScale.domain();
 
-        filtered = filtered.filter((p) => {
+        // 1. Filter by Time Range (Visible Domain)
+        // We add a buffer so bars don't pop in/out abruptly
+        let candidates = people.filter((p) => {
             const birth = p.birthYear;
             const death = p.deathYear || currentYear;
-            // Check strict overlap with buffer
-            return death >= minYear - 50 && birth <= maxYear + 50;
+            return death >= minYear - 20 && birth <= maxYear + 20;
         });
 
-        const sorted = [...filtered].sort((a, b) => {
-            if (b.prominenceScore !== a.prominenceScore) {
-                return b.prominenceScore - a.prominenceScore;
-            }
-            return a.birthYear - b.birthYear;
-        });
+        // 2. Sort candidates by prominence descending
+        // Important: We prioritize showcasing the most famous people in the current view
+        candidates.sort((a, b) => b.prominenceScore - a.prominenceScore);
 
-        // No more slicing! We show everyone who fits the criteria.
-        return sorted;
+        // 3. Limit to what fits in the viewport
+        const maxRows = Math.floor(
+            (height - margin.top - margin.bottom) / ROW_HEIGHT,
+        );
+        // Ensure at least 5 rows if possible
+        const limit = Math.max(5, maxRows);
+        const visible = candidates.slice(0, limit);
+
+        // 4. Sort by birth year for display
+        return visible.sort((a, b) => a.birthYear - b.birthYear);
     }
 
     function updateDimensions() {
-        if (!container || typeof window === "undefined") return;
-        width = container.clientWidth;
-        height = container.clientHeight; // This is the viewport height
+        if (!viewport || typeof window === "undefined") return;
 
-        if (svg && width > 0 && height > 0) {
-            d3.select(svg).attr("width", width);
-            // Height will be set in render() based on content
+        width = viewport.clientWidth;
+        height = viewport.clientHeight;
+
+        if (mainSvg && width > 0 && height > 0) {
+            d3.select(mainSvg).attr("width", width).attr("height", height); // Fixed height to viewport
 
             if (baseXScale) {
                 baseXScale.range([margin.left, width - margin.right]);
             }
         }
+
+        if (axisSvg && width > 0) {
+            d3.select(axisSvg).attr("width", width);
+        }
     }
 
     function initializeZoom() {
-        if (!svg || width === 0) return;
+        if (!mainSvg || width === 0) return;
 
         baseXScale = d3
             .scaleLinear()
             .domain([MIN_YEAR, MAX_YEAR])
             .range([margin.left, width - margin.right]);
 
-        if (!g && gElement) {
-            g = d3.select(gElement);
-        }
+        // Init Selections
+        if (!mainG && mainGElement) mainG = d3.select(mainGElement);
+        if (!axisG && axisGElement) axisG = d3.select(axisGElement);
 
-        if (!g) return;
+        if (!mainG || !axisG) return;
 
         zoom = d3
             .zoom<SVGSVGElement, unknown>()
-            .scaleExtent([1, 50]) // Allow deep zoom
+            .scaleExtent([1, 200]) // Allow deep zoom
             .translateExtent([
-                [margin.left - 200, -Infinity],
-                [width - margin.right + 200, Infinity],
+                [margin.left - 500, -Infinity],
+                [width - margin.right + 500, Infinity],
             ])
-            .filter((event) => {
-                // Ctrl+Wheel to zoom, otherwise Wheel scrolls
-                if (event.type === "wheel") {
-                    return event.ctrlKey || event.metaKey;
-                }
-                return true;
-            })
+            // No filter! Wheel = Zoom.
             .on("zoom", (event) => {
                 zoomTransform = event.transform;
                 render();
             });
 
-        d3.select(svg).call(zoom as any);
+        d3.select(mainSvg).call(zoom as any);
     }
 
     function render() {
         if (
-            !g ||
-            !gElement ||
+            !mainG ||
+            !axisG ||
             !baseXScale ||
             width === 0 ||
             people.length === 0
@@ -132,23 +136,23 @@
             return;
 
         const xScale = zoomTransform.rescaleX(baseXScale);
-        const visiblePeople = getVisiblePeople(people, zoomTransform, width);
 
-        // Calculate needed height
-        const contentHeight =
-            visiblePeople.length * ROW_HEIGHT + margin.top + margin.bottom;
-        const actualHeight = Math.max(height, contentHeight);
+        // ----- MAIN CONTENT RENDER -----
 
-        // Resize SVG to fit content
-        d3.select(svg).attr("height", actualHeight);
+        const visiblePeople = getVisiblePeople(
+            people,
+            zoomTransform,
+            width,
+            height,
+        );
 
-        // Grid lines
+        // Grid lines (in Main only)
         const gridData = d3.range(
             Math.ceil(MIN_YEAR / 100) * 100,
             MAX_YEAR + 1,
             100,
         );
-        const gridLines = g
+        const gridLines = mainG
             .selectAll(".grid-line")
             .data(gridData, (d) => d.toString());
 
@@ -163,24 +167,21 @@
             .merge(gridLines as any)
             .attr("x1", (d) => xScale(d))
             .attr("x2", (d) => xScale(d))
-            .attr("y1", margin.top)
-            .attr("y2", actualHeight - margin.bottom)
+            .attr("y1", 0) // Full height
+            .attr("y2", height)
             .attr("stroke", "#e5e7eb")
             .attr("stroke-width", 1)
             .attr("opacity", 0.5);
 
-        // Person rows - use key function for better performance
-        const rows = g
+        // Rows
+        const rows = mainG
             .selectAll(".person-row")
             .data(visiblePeople, (d) => d.id);
 
         rows.exit().remove();
-
         const rowsEnter = rows.enter().append("g").attr("class", "person-row");
-
         const rowsMerged = rowsEnter.merge(rows as any);
 
-        // Position rows
         rowsMerged.attr("transform", (d, i) => {
             const y = margin.top + i * ROW_HEIGHT;
             return `translate(0, ${y})`;
@@ -189,16 +190,18 @@
         // Lifespan bars
         const bars = rowsMerged.selectAll(".lifespan-bar").data((d) => [d]);
 
+        const barWidthFn = (d: Person) => {
+            const endYear = d.deathYear || currentYear;
+            return Math.max(0, xScale(endYear) - xScale(d.birthYear));
+        };
+
         bars.enter()
             .append("rect")
             .attr("class", "lifespan-bar")
             .merge(bars as any)
             .attr("x", (d) => xScale(d.birthYear))
             .attr("y", 0)
-            .attr("width", (d) => {
-                const endYear = d.deathYear || currentYear;
-                return Math.max(5, xScale(endYear) - xScale(d.birthYear));
-            })
+            .attr("width", barWidthFn)
             .attr("height", BAR_HEIGHT)
             .attr("fill", (d) => d.color)
             .attr("stroke", "#000")
@@ -218,7 +221,31 @@
                 d3.select(event.currentTarget).attr("stroke-width", 1);
             });
 
-        // Name and year labels inside bars
+        // Clip Paths (strictly contain text)
+        const clips = rowsMerged.selectAll(".bar-clip").data((d) => [d]);
+        const clipsEnter = clips
+            .enter()
+            .append("defs")
+            .append("clipPath")
+            .attr("class", "bar-clip")
+            .attr("id", (d) => `clip-${d.id}`);
+        clipsEnter.append("rect");
+
+        clips
+            .merge(
+                clipsEnter.select(function () {
+                    return this.parentNode;
+                }) as any,
+            )
+            .select("clipPath")
+            .attr("id", (d) => `clip-${d.id}`)
+            .select("rect")
+            .attr("x", (d) => xScale(d.birthYear))
+            .attr("y", 0)
+            .attr("width", barWidthFn)
+            .attr("height", BAR_HEIGHT);
+
+        // Labels
         const labels = rowsMerged.selectAll(".bar-label").data((d) => [d]);
 
         labels
@@ -226,33 +253,55 @@
             .append("text")
             .attr("class", "bar-label")
             .merge(labels as any)
-            .attr("x", (d) => xScale(d.birthYear) + 6)
             .attr("y", BAR_HEIGHT / 2 + 4)
             .attr("fill", "#000")
             .attr("font-size", "11px")
             .attr("font-weight", "500")
             .attr("font-family", "system-ui, sans-serif")
             .attr("pointer-events", "none")
-            .text((d) => {
-                const endYear = d.deathYear || currentYear;
-                const barWidth = xScale(endYear) - xScale(d.birthYear);
-                // Only show text if bar is wide enough
-                if (barWidth > 80) {
-                    return `${d.name} (${d.birthYear}–${d.deathYear || "present"})`;
-                } else if (barWidth > 40) {
-                    return d.name;
+            .attr("clip-path", (d) => `url(#clip-${d.id})`)
+            .each(function (d) {
+                // STICKY LABEL LOGIC
+                const startX = xScale(d.birthYear);
+                const endX = xScale(d.deathYear || currentYear);
+                const barWidth = endX - startX;
+
+                // Sticky X: clamp to 0 (left edge), but offset by 6px padding
+                // AND ensure we don't push past the end of the bar
+                const stickyX = Math.max(startX, 0) + 6;
+                d3.select(this).attr("x", stickyX);
+
+                // Calculate space available for text from sticky start to end of bar
+                const available = endX - stickyX - 6;
+
+                if (available < 20) {
+                    d3.select(this).text("");
+                    return;
                 }
-                return "";
+
+                let text = d.name;
+                const charWidth = 7;
+                const maxChars = Math.floor(available / charWidth);
+
+                // Show dates if bar is wide enough relative to screen
+                if (barWidth > 160 && available > 100) {
+                    const longText = `${d.name} (${d.birthYear}–${d.deathYear || "present"})`;
+                    if (longText.length * charWidth < available) {
+                        text = longText;
+                    }
+                }
+
+                if (text.length > maxChars) {
+                    text = text.slice(0, Math.max(0, maxChars - 2)) + "...";
+                }
+                d3.select(this).text(text);
             });
 
-        // X-axis (Draw at bottom of VIEWPORT or CONTENT?)
-        // If content is huge, axis at bottom of content is invisible.
-        // For now, let's keep it consistent: Bottom of content area, so users can see "Where does it end?"
-        // But users prefer axis at top or fixed?
-        // Let's stick with bottom of SVG for simplicity in V1. Use actualHeight.
-        let xAxisG = g.select(".x-axis");
+        // ----- AXIS RENDER -----
+
+        let xAxisG = axisG.select(".x-axis");
         if (xAxisG.empty()) {
-            xAxisG = g.append("g").attr("class", "x-axis axis");
+            xAxisG = axisG.append("g").attr("class", "x-axis axis");
         }
 
         const xAxis = d3
@@ -261,7 +310,7 @@
             .ticks(Math.min(20, Math.floor(width / 80)));
 
         xAxisG
-            .attr("transform", `translate(0, ${actualHeight - margin.bottom})`)
+            .attr("transform", `translate(0, 10)`)
             .call(xAxis as any)
             .selectAll("text")
             .attr("fill", "#000")
@@ -273,21 +322,29 @@
     }
 
     function zoomIn() {
-        if (!svg) return;
-        const newK = Math.min(50, zoomTransform.k * 1.5);
-        d3.select(svg)
+        if (!mainSvg) return;
+        const newK = Math.min(200, zoomTransform.k * 1.5);
+        d3.select(mainSvg)
             .transition()
             .duration(200)
             .call(zoom.scaleTo as any, newK);
     }
 
     function zoomOut() {
-        if (!svg) return;
+        if (!mainSvg) return;
         const newK = Math.max(1, zoomTransform.k / 1.5);
-        d3.select(svg)
+        d3.select(mainSvg)
             .transition()
             .duration(200)
             .call(zoom.scaleTo as any, newK);
+    }
+
+    function resetZoom() {
+        if (!mainSvg) return;
+        d3.select(mainSvg)
+            .transition()
+            .duration(500)
+            .call(zoom.transform as any, d3.zoomIdentity);
     }
 
     onMount(() => {
@@ -295,35 +352,26 @@
 
         const resizeObserver = new ResizeObserver(() => {
             updateDimensions();
-            if (g && baseXScale) {
+            if (mainG && baseXScale) {
                 render();
             }
         });
 
-        if (container) {
-            resizeObserver.observe(container);
-        }
+        if (viewport) resizeObserver.observe(viewport);
+        if (viewport?.parentElement)
+            resizeObserver.observe(viewport.parentElement);
 
-        if (container?.parentElement) {
-            resizeObserver.observe(container.parentElement);
-        }
-
-        if (gElement) {
-            g = d3.select(gElement);
-        }
+        if (mainGElement) mainG = d3.select(mainGElement);
+        if (axisGElement) axisG = d3.select(axisGElement);
 
         requestAnimationFrame(() => {
             updateDimensions();
             initializeZoom();
-            if (g) {
-                render();
-            }
-
+            render();
+            // Retry for layout stabilization
             setTimeout(() => {
                 updateDimensions();
-                if (g && baseXScale && width > 0) {
-                    render();
-                }
+                render();
             }, 100);
         });
 
@@ -332,26 +380,31 @@
         };
     });
 
-    $: if (people.length > 0 && g && baseXScale && width > 0) {
+    $: if (people.length > 0 && mainG && baseXScale && width > 0) {
         render();
     }
 </script>
 
-<div class="timeline-wrapper" bind:this={container}>
-    <div class="help-text">Use <b>Ctrl + Scroll</b> to zoom</div>
-    <svg bind:this={svg} class:grabbing={false}>
-        <!-- grabbing removed, managed by d3 -->
-        <g bind:this={gElement}></g>
-    </svg>
+<div class="timeline-app">
+    <div class="main-viewport" bind:this={viewport}>
+        <div class="help-text">
+            <b>Scroll</b> to zoom in/out • <b>Drag</b> to pan
+        </div>
+        <svg bind:this={mainSvg}>
+            <g bind:this={mainGElement}></g>
+        </svg>
+    </div>
 
-    <!-- Zoom controls -->
+    <!-- Fixed Axis at bottom -->
+    <div class="axis-container" bind:this={axisContainer}>
+        <svg bind:this={axisSvg} height={AXIS_HEIGHT}>
+            <g bind:this={axisGElement}></g>
+        </svg>
+    </div>
+
+    <!-- Zoom controls (Absolute to timeline-app) -->
     <div class="zoom-controls">
-        <button
-            class="zoom-btn"
-            on:click={zoomIn}
-            title="Zoom in"
-            aria-label="Zoom in"
-        >
+        <button class="zoom-btn" on:click={zoomIn} title="Zoom in">
             <svg
                 width="18"
                 height="18"
@@ -368,12 +421,7 @@
                 <line x1="8" x2="14" y1="11" y2="11"></line>
             </svg>
         </button>
-        <button
-            class="zoom-btn"
-            on:click={zoomOut}
-            title="Zoom out"
-            aria-label="Zoom out"
-        >
+        <button class="zoom-btn" on:click={zoomOut} title="Zoom out">
             <svg
                 width="18"
                 height="18"
@@ -389,12 +437,30 @@
                 <line x1="8" x2="14" y1="11" y2="11"></line>
             </svg>
         </button>
+        <div class="divider"></div>
+        <button class="zoom-btn" on:click={resetZoom} title="Reset View">
+            <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            >
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
+                ></path>
+                <path d="M3 3v5h5"></path>
+            </svg>
+        </button>
     </div>
 
     <!-- Info badge -->
     <div class="info-badge">
         <p class="info-text">
-            {getVisiblePeople(people, zoomTransform, width).length} visible
+            {getVisiblePeople(people, zoomTransform, width, height).length} prominent
+            people visible
         </p>
         <p class="info-text zoom-level">
             Zoom: {Math.round(zoomTransform.k * 10) / 10}x
@@ -403,14 +469,33 @@
 </div>
 
 <style>
-    .timeline-wrapper {
+    .timeline-app {
         width: 100%;
         height: 100%;
+        display: flex;
+        flex-direction: column;
         position: relative;
         background: #faf9f6;
-        /* Enable vertical scrolling */
-        overflow-y: auto;
-        overflow-x: hidden;
+        overflow: hidden;
+    }
+
+    .main-viewport {
+        flex: 1;
+        overflow: hidden; /* No scrollbars! */
+        position: relative;
+        cursor: grab;
+    }
+
+    .main-viewport:active {
+        cursor: grabbing;
+    }
+
+    .axis-container {
+        flex-shrink: 0;
+        height: 40px;
+        background: #faf9f6;
+        border-top: 1px solid #e5e7eb;
+        z-index: 5;
     }
 
     .help-text {
@@ -426,24 +511,28 @@
         border: 1px solid #ddd;
         pointer-events: none;
         z-index: 20;
+        width: fit-content;
+        margin: 0 auto;
     }
 
     svg {
-        width: 100%;
-        /* Height handled by d3 */
         display: block;
-        /* Remove grab cursor since we prioritize scroll */
-        /* cursor: grab; */
     }
 
     .zoom-controls {
-        position: fixed; /* Fixed so it stays in view when scrolling */
+        position: absolute;
         right: 16px;
-        top: 80px; /* Below header */
+        top: 16px;
         display: flex;
         flex-direction: column;
         gap: 4px;
-        z-index: 10;
+        z-index: 30; /* Higher than axis */
+    }
+
+    .divider {
+        height: 1px;
+        background: #e5e7eb;
+        margin: 2px 4px;
     }
 
     .zoom-btn {
@@ -468,14 +557,14 @@
     }
 
     .info-badge {
-        position: fixed; /* Fixed so it stays in view when scrolling */
+        position: absolute;
         left: 16px;
-        bottom: 16px; /* Moved to bottom left so it doesn't conflict with top */
+        bottom: 56px; /* Above axis (40px) + padding */
         background: white;
         padding: 8px 12px;
         border-radius: 4px;
         border: 1px solid #e5e7eb;
-        z-index: 10;
+        z-index: 30;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
 
@@ -494,11 +583,9 @@
     :global(.person-row) {
         pointer-events: none;
     }
-
     :global(.lifespan-bar) {
         pointer-events: all;
     }
-
     :global(.lifespan-bar:hover) {
         filter: brightness(0.95);
     }

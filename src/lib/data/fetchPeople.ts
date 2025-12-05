@@ -50,8 +50,8 @@ const colors = {
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const CURRENT_YEAR = new Date().getFullYear();
-const MIN_YEAR = 800;
-const MAX_YEAR = CURRENT_YEAR;
+const MIN_YEAR = 700;
+const MAX_YEAR = CURRENT_YEAR + 1;
 const CHUNK_SIZE = 1000;
 
 // Wikidata occupation Q-IDs by category
@@ -127,7 +127,7 @@ function saveState(state: FetchState, category?: string) {
 function loadState(category?: string): FetchState | null {
 	const stateFile = getStateFile(category);
 	if (!existsSync(stateFile)) return null;
-	
+
 	try {
 		const data = JSON.parse(readFileSync(stateFile, 'utf-8'));
 		return {
@@ -148,7 +148,7 @@ function saveTempData(people: PersonData[], category?: string) {
 function loadTempData(category?: string): PersonData[] {
 	const tempFile = getTempFile(category);
 	if (!existsSync(tempFile)) return [];
-	
+
 	try {
 		return JSON.parse(readFileSync(tempFile, 'utf-8'));
 	} catch {
@@ -158,7 +158,7 @@ function loadTempData(category?: string): PersonData[] {
 
 function mergeAllCategoryData(): PersonData[] {
 	const allPeople = new Map<string, PersonData>();
-	
+
 	// Load all category temp files
 	for (const category of Object.keys(OCCUPATION_IDS)) {
 		const categoryData = loadTempData(category);
@@ -173,7 +173,7 @@ function mergeAllCategoryData(): PersonData[] {
 			}
 		});
 	}
-	
+
 	// Also load general temp file
 	const generalData = loadTempData();
 	generalData.forEach(p => {
@@ -181,7 +181,7 @@ function mergeAllCategoryData(): PersonData[] {
 			allPeople.set(p.id, p);
 		}
 	});
-	
+
 	return Array.from(allPeople.values());
 }
 
@@ -190,17 +190,17 @@ function saveFinalData(people: PersonData[]) {
 }
 
 async function queryWikidata(
-	offset = 0, 
-	limit = 1000, 
+	offset = 0,
+	limit = 1000,
 	category?: string
 ): Promise<{ rows: SparqlRow[]; hasMore: boolean }> {
 	let query: string;
-	
+
 	if (category && OCCUPATION_IDS[category]) {
 		// Category-specific query - much faster!
 		const occupationIds = OCCUPATION_IDS[category];
 		const occupationFilter = occupationIds.map(id => `wd:${id}`).join(' || ');
-		
+
 		query = `
 			SELECT ?person ?personLabel ?personDescription ?birth ?death ?image ?occLabel ?article WHERE {
 				?person wdt:P31 wd:Q5.
@@ -260,14 +260,14 @@ async function queryWikidata(
 
 	const categoryText = category ? `${colors.magenta}[${category.toUpperCase()}]${colors.reset} ` : '';
 	log(`${colors.blue}→${colors.reset} ${categoryText}Querying offset ${offset} (limit: ${limit})...`, colors.dim);
-	
+
 	const startTime = Date.now();
 	const url = `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&format=json`;
-	
+
 	try {
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 45000);
-		
+
 		const response = await fetch(url, {
 			headers: {
 				'Accept': 'application/sparql-results+json',
@@ -288,9 +288,9 @@ async function queryWikidata(
 		const data = await response.json();
 		const rows = data.results?.bindings || [];
 		const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-		
+
 		logSuccess(`Got ${colors.bright}${rows.length}${colors.reset}${colors.green} rows in ${elapsed}s`);
-		
+
 		return {
 			rows,
 			hasMore: rows.length === limit
@@ -315,10 +315,10 @@ function parseYear(dateString: string | undefined): number | null {
 
 async function extractImageUrl(imageValue: string | undefined): Promise<string | null> {
 	if (!imageValue) return null;
-	
+
 	let filename: string;
 	let directoryPath: string | null = null;
-	
+
 	if (imageValue.includes('http')) {
 		// Extract filename from various URL formats
 		if (imageValue.includes('/wiki/Special:FilePath/')) {
@@ -330,17 +330,17 @@ async function extractImageUrl(imageValue: string | undefined): Promise<string |
 			const urlMatch = imageValue.match(/upload\.wikimedia\.org\/wikipedia\/commons\/(thumb\/)?(.+)/);
 			if (urlMatch) {
 				const pathAfterCommons = urlMatch[2];
-				
+
 				// Check if it's a thumbnail URL (contains /thumb/ and /200px- or similar)
 				if (pathAfterCommons.startsWith('thumb/')) {
 					// Extract the directory path (before the filename) and filename
 					// Format: thumb/X/Xy/Filename.ext/200px-Filename.ext
 					const parts = pathAfterCommons.replace(/^thumb\//, '').split('/');
 					const lastPart = parts[parts.length - 1];
-					
+
 					// Remove thumbnail size prefix (e.g., "200px-")
 					const actualFilename = lastPart.replace(/^\d+px-/, '');
-					
+
 					// IMPORTANT: Don't trust the directory path in thumbnail URLs
 					// Commons uses MD5 hashing, and thumbnail URLs may have wrong paths
 					// Extract just the filename and let it fall through to filename-based construction
@@ -363,16 +363,16 @@ async function extractImageUrl(imageValue: string | undefined): Promise<string |
 		// Just filename (raw P18 value)
 		filename = decodeURIComponent(imageValue);
 	}
-	
+
 	// Clean filename - decode URL encoding and normalize
 	filename = decodeURIComponent(filename).replace(/\s/g, '_').replace(/^_+|_+$/g, '');
 	if (!filename) return null;
-	
+
 	// If we have a directory path from a full URL (not thumbnail), use it
 	if (directoryPath && !imageValue?.includes('/thumb/')) {
 		return `https://upload.wikimedia.org/wikipedia/commons/${directoryPath}/${encodeURIComponent(filename)}`;
 	}
-	
+
 	// For thumbnail URLs or raw filenames, use MediaWiki API to get correct URL
 	// This ensures we get the right MD5-based directory structure
 	try {
@@ -381,7 +381,7 @@ async function extractImageUrl(imageValue: string | undefined): Promise<string |
 	} catch (error) {
 		// Silently fail - will use fallback
 	}
-	
+
 	// Fallback: construct using Special:FilePath (may redirect, but should work)
 	const encodedFilename = encodeURIComponent(filename);
 	return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodedFilename}`;
@@ -397,30 +397,30 @@ async function resolveImageUrl(filename: string): Promise<string | null> {
 			`iiprop=url&` +
 			`format=json&` +
 			`origin=*`;
-		
+
 		const response = await fetch(apiUrl, {
 			headers: {
 				'User-Agent': 'Norgeskart/1.0 (https://github.com/your-repo)'
 			}
 		});
-		
+
 		if (!response.ok) return null;
-		
+
 		const data = await response.json();
 		const pages = data.query?.pages;
 		if (!pages) return null;
-		
+
 		const pageId = Object.keys(pages)[0];
 		const page = pages[pageId];
 		const imageinfo = page?.imageinfo?.[0];
-		
+
 		if (imageinfo?.url) {
 			return imageinfo.url;
 		}
 	} catch (error) {
 		// Fail silently
 	}
-	
+
 	return null;
 }
 
@@ -435,20 +435,20 @@ async function processRows(rows: SparqlRow[], existingPeople: Map<string, Person
 		summary: string;
 		occupations: Set<string>;
 	}>();
-	
+
 	for (const row of rows) {
 		const personId = row.person.value.split('/').pop() || '';
-		
+
 		if (!personMap.has(personId) && !existingPeople.has(personId)) {
 			const birthYear = parseYear(row.birth?.value);
 			const deathYear = parseYear(row.death?.value);
-			
+
 			if (birthYear !== null && (birthYear < MIN_YEAR || birthYear > MAX_YEAR)) {
 				continue;
 			}
-			
+
 			if (birthYear === null) continue;
-			
+
 			personMap.set(personId, {
 				id: personId,
 				name: row.personLabel?.value || 'Unknown',
@@ -460,20 +460,20 @@ async function processRows(rows: SparqlRow[], existingPeople: Map<string, Person
 				occupations: new Set()
 			});
 		}
-		
+
 		const person = personMap.get(personId);
 		if (person && row.occLabel?.value) {
 			person.occupations.add(row.occLabel.value);
 		}
 	}
-	
+
 	const newPeople: PersonData[] = [];
-	
+
 	for (const [id, data] of personMap.entries()) {
 		const occupations = Array.from(data.occupations).slice(0, 5);
 		const primaryOccupation = occupations[0] || 'unknown';
 		const color = getColorForOccupation(primaryOccupation);
-		
+
 		newPeople.push({
 			id: data.id,
 			name: data.name,
@@ -486,30 +486,30 @@ async function processRows(rows: SparqlRow[], existingPeople: Map<string, Person
 			color
 		});
 	}
-	
+
 	return newPeople;
 }
 
 async function fetchCategory(category?: string) {
 	const startTime = Date.now();
-	
+
 	const categoryLabel = category ? category.toUpperCase() : 'ALL';
 	logHeader(`🎯 Fetching: ${categoryLabel}`);
-	
+
 	const state = loadState(category);
 	const existingPeople = new Map<string, PersonData>();
-	
+
 	if (state) {
 		logInfo(`Resuming from previous session:`);
 		log(`  Last offset: ${state.lastOffset.toLocaleString()}`, colors.dim);
 		log(`  Total rows: ${state.totalRowsFetched.toLocaleString()}`, colors.dim);
 		log(`  Persons: ${state.processedIds.size.toLocaleString()}`, colors.dim);
-		
+
 		const tempData = loadTempData(category);
 		tempData.forEach(p => existingPeople.set(p.id, p));
 		logSuccess(`Loaded ${tempData.length.toLocaleString()} existing persons\n`);
 	}
-	
+
 	const currentState: FetchState = {
 		lastOffset: state?.lastOffset || 0,
 		processedIds: state?.processedIds || new Set(),
@@ -517,24 +517,24 @@ async function fetchCategory(category?: string) {
 		lastUpdate: new Date().toISOString(),
 		category
 	};
-	
+
 	let offset = currentState.lastOffset;
 	const maxRows = 50000;
 	let consecutiveFailures = 0;
 	const maxFailures = 3;
 	let chunkCount = 0;
-	
+
 	log(`${colors.cyan}Fetching in chunks of ${CHUNK_SIZE} rows${colors.reset}\n`);
-	
+
 	while (offset < maxRows && consecutiveFailures < maxFailures) {
 		try {
 			const { rows, hasMore } = await queryWikidata(offset, CHUNK_SIZE, category);
-			
+
 			if (rows.length === 0) {
 				logWarning(`No more data at offset ${offset}`);
 				break;
 			}
-			
+
 			const newPeople = await processRows(rows, existingPeople);
 			newPeople.forEach(p => {
 				if (!existingPeople.has(p.id)) {
@@ -542,13 +542,13 @@ async function fetchCategory(category?: string) {
 					currentState.processedIds.add(p.id);
 				}
 			});
-			
+
 			chunkCount++;
 			currentState.lastOffset = offset + rows.length;
 			currentState.totalRowsFetched += rows.length;
-			
+
 			log(`  ${colors.dim}📊 ${currentState.processedIds.size.toLocaleString()} persons (offset: ${currentState.lastOffset})${colors.reset}\n`);
-			
+
 			if (chunkCount % 3 === 0 || !hasMore) {
 				const allPeople = Array.from(existingPeople.values());
 				allPeople.sort((a, b) => a.birthYear - b.birthYear);
@@ -556,21 +556,21 @@ async function fetchCategory(category?: string) {
 				saveState(currentState, category);
 				logSuccess(`Progress saved: ${allPeople.length.toLocaleString()} persons\n`);
 			}
-			
+
 			consecutiveFailures = 0;
 			offset += rows.length;
-			
+
 			if (!hasMore) {
 				logInfo('Reached end of data');
 				break;
 			}
-			
+
 			await new Promise(resolve => setTimeout(resolve, 1500));
-			
+
 		} catch (error: any) {
 			consecutiveFailures++;
 			logError(`Failed (${consecutiveFailures}/${maxFailures}): ${error.message}`);
-			
+
 			if (consecutiveFailures >= maxFailures) {
 				const allPeople = Array.from(existingPeople.values());
 				allPeople.sort((a, b) => a.birthYear - b.birthYear);
@@ -579,16 +579,16 @@ async function fetchCategory(category?: string) {
 				logWarning(`\nStopped due to errors. Progress saved. Run again to continue.`);
 				return;
 			}
-			
+
 			await new Promise(resolve => setTimeout(resolve, 5000 * consecutiveFailures));
 		}
 	}
-	
+
 	const allPeople = Array.from(existingPeople.values());
 	allPeople.sort((a, b) => a.birthYear - b.birthYear);
 	saveTempData(allPeople, category);
 	saveState(currentState, category);
-	
+
 	const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
 	logSuccess(`${categoryLabel}: ${allPeople.length.toLocaleString()} persons in ${totalTime}s`);
 }
@@ -597,15 +597,15 @@ async function main() {
 	try {
 		// Parse command line args
 		const args = process.argv.slice(2);
-		
+
 		// Debug: log all arguments
 		if (args.length > 0) {
 			logInfo(`Arguments received: ${args.join(', ')}`);
 		}
-		
+
 		// Handle --category=value or --category value
 		let category: string | undefined;
-		
+
 		// Try to find category argument
 		for (let i = 0; i < args.length; i++) {
 			const arg = args[i];
@@ -625,15 +625,15 @@ async function main() {
 				}
 			}
 		}
-		
+
 		// Clean up category if it was incorrectly parsed
 		if (category && category.startsWith('--category=')) {
 			category = category.substring('--category='.length);
 		}
-		
+
 		const merge = args.includes('--merge');
 		const listCategories = args.includes('--list') || args.includes('--categories');
-		
+
 		if (listCategories) {
 			console.log('\n📋 Available categories:\n');
 			Object.keys(OCCUPATION_IDS).forEach(cat => {
@@ -642,19 +642,19 @@ async function main() {
 			console.log('\nUsage: npm run generate:data -- --category=<category>\n');
 			return;
 		}
-		
+
 		if (merge) {
 			logHeader('🔀 Merging All Category Data');
 			const allPeople = mergeAllCategoryData();
 			allPeople.sort((a, b) => a.birthYear - b.birthYear);
 			saveFinalData(allPeople);
-			
+
 			const withImages = allPeople.filter(p => p.imageUrl).length;
 			logSuccess(`Merged ${allPeople.length.toLocaleString()} total persons`);
 			logInfo(`With images: ${withImages.toLocaleString()} (${((withImages / allPeople.length) * 100).toFixed(1)}%)`);
 			return;
 		}
-		
+
 		if (category) {
 			if (!OCCUPATION_IDS[category]) {
 				logError(`Unknown category: ${category}`);
@@ -669,7 +669,7 @@ async function main() {
 			logInfo('Use --list to see available categories\n');
 			await fetchCategory(undefined);
 		}
-		
+
 	} catch (error) {
 		log(`\n${colors.bright}${colors.red}FATAL ERROR${colors.reset}`, colors.bright);
 		logError(`${error}`);
