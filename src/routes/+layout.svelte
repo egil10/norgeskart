@@ -1,33 +1,14 @@
 <script>
 	import '../app.css';
-	import { onMount } from 'svelte';
+	import type { LayoutData } from './$types';
 
-	let darkMode = false;
+	export let data: LayoutData;
+	export let params: Record<string, string> = {};
 
-	onMount(() => {
-		// Check for saved theme preference or default to light mode
-		const saved = localStorage.getItem('darkMode');
-		darkMode = saved === 'true';
-		updateTheme();
-	});
-
-	function toggleDarkMode() {
-		darkMode = !darkMode;
-		localStorage.setItem('darkMode', darkMode.toString());
-		updateTheme();
-	}
-
-	function updateTheme() {
-		if (darkMode) {
-			document.documentElement.classList.add('dark');
-		} else {
-			document.documentElement.classList.remove('dark');
-		}
-	}
+	// Accept params to avoid warning, but we don't use it
 </script>
 
-<div class="min-h-screen bg-white dark:bg-[#0a0a0a]">
+<div class="h-screen overflow-hidden flex flex-col">
 	<slot />
-
 </div>
 

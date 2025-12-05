@@ -8,6 +8,7 @@
 
 	let svg: SVGSVGElement;
 	let container: HTMLDivElement;
+	let gElement: SVGGElement;
 	let width = 0;
 	let height = 0;
 	let currentYear = new Date().getFullYear();
@@ -22,7 +23,7 @@
 	
 	let baseXScale: d3.ScaleLinear<number, number>;
 	let zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
-	let g: d3.Selection<SVGGElement, unknown, null, undefined>;
+	let g: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
 	let zoomTransform: d3.ZoomTransform = d3.zoomIdentity;
 	let hoveredPerson: Person | null = null;
 
@@ -61,9 +62,31 @@
 	}
 
 	function updateDimensions() {
-		if (!container) return;
+		if (!container || typeof window === 'undefined') return;
 		width = container.clientWidth;
-		height = container.clientHeight;
+		
+		// Get height from container's bounding rect
+		const rect = container.getBoundingClientRect();
+		height = Math.max(rect.height, container.clientHeight || 0);
+		
+		// If still 0, try parent
+		if (height === 0 && container.parentElement) {
+			const parent = container.parentElement;
+			const parentRect = parent.getBoundingClientRect();
+			// Get wrapper height
+			const wrapper = parent.parentElement;
+			if (wrapper) {
+				const wrapperRect = wrapper.getBoundingClientRect();
+				height = wrapperRect.height;
+			} else {
+				height = parentRect.height;
+			}
+		}
+		
+		// Fallback: use viewport height
+		if (height === 0) {
+			height = window.innerHeight - 200; // Approximate header + footer
+		}
 		
 		if (svg && width > 0 && height > 0) {
 			d3.select(svg)
@@ -83,6 +106,13 @@
 			.domain([MIN_YEAR, MAX_YEAR])
 			.range([margin.left, width - margin.right]);
 
+		// Initialize g as D3 selection from gElement
+		if (!g && gElement) {
+			g = d3.select(gElement);
+		}
+
+		if (!g) return;
+
 		zoom = d3.zoom<SVGSVGElement, unknown>()
 			.scaleExtent([0.5, 20])
 			.translateExtent([
@@ -92,29 +122,31 @@
 			.on('zoom', (event) => {
 				zoomTransform = event.transform;
 				render();
-				renderMiniTimeline();
+				updateZoomSlider();
 			});
 
 		d3.select(svg).call(zoom as any);
 	}
 
 	function render() {
-		if (!g || !baseXScale || width === 0 || height === 0 || people.length === 0) return;
+		if (!g || !gElement || !baseXScale || width === 0 || height === 0 || people.length === 0) return;
 
 		const xScale = zoomTransform.rescaleX(baseXScale);
 		const zoomScale = zoomTransform.k;
 		const visiblePeople = getVisiblePeople(people, zoomScale);
 		
-		// Clear existing
-		g.selectAll('.person-row, .grid-line, .axis').remove();
-
-		// Grid lines (every 100 years)
+		// Grid lines (every 100 years) - using proper enter/update/exit
+		const gridData = d3.range(MIN_YEAR, MAX_YEAR + 1, 100);
 		const gridLines = g.selectAll('.grid-line')
-			.data(d3.range(MIN_YEAR, MAX_YEAR + 1, 100));
+			.data(gridData, d => d.toString());
 
-		gridLines.enter()
+		gridLines.exit().remove();
+
+		const gridEnter = gridLines.enter()
 			.append('line')
-			.attr('class', 'grid-line')
+			.attr('class', 'grid-line');
+
+		gridEnter.merge(gridLines as any)
 			.attr('x1', d => xScale(d))
 			.attr('x2', d => xScale(d))
 			.attr('y1', margin.top)
@@ -130,25 +162,28 @@
 		rows.exit()
 			.transition()
 			.duration(300)
-			.attr('opacity', 0)
+			.style('opacity', 0)
 			.remove();
 
 		const rowsEnter = rows.enter()
 			.append('g')
 			.attr('class', 'person-row')
-			.attr('opacity', 0);
+			.style('opacity', 0);
 
 		rowsEnter.transition()
 			.duration(400)
-			.attr('opacity', 1);
+			.style('opacity', 1);
 
 		const rowsMerged = rowsEnter.merge(rows as any);
 
 		// Update row positions - spread across full height
-		rowsMerged.attr('transform', (d, i) => {
-			const y = getRowY(i, visiblePeople.length);
-			return `translate(0, ${y - ROW_HEIGHT / 2})`;
-		});
+		rowsMerged
+			.attr('transform', (d, i) => {
+				const y = getRowY(i, visiblePeople.length);
+				return `translate(0, ${y - ROW_HEIGHT / 2})`;
+			})
+			// Ensure opacity is set correctly for both new and existing rows
+			.style('opacity', 1);
 
 		// Lifespan bars
 		const bars = rowsMerged.selectAll('.lifespan-bar')
@@ -227,14 +262,17 @@
 				return `${d.birthYear}–${endYear}`;
 			});
 
-		// X-axis
+		// X-axis - ensure only one exists
+		let xAxisG = g.select('.x-axis');
+		if (xAxisG.empty()) {
+			xAxisG = g.append('g').attr('class', 'x-axis axis');
+		}
+		
 		const xAxis = d3.axisBottom(xScale)
 			.tickFormat(d3.format('d'))
 			.ticks(Math.min(15, Math.floor(width / 100)));
 
-		g.selectAll('.x-axis').remove();
-		g.append('g')
-			.attr('class', 'x-axis axis')
+		xAxisG
 			.attr('transform', `translate(0, ${height - margin.bottom})`)
 			.call(xAxis as any)
 			.selectAll('text')
@@ -242,89 +280,6 @@
 			.attr('font-size', '11px');
 	}
 
-	// Mini timeline
-	let miniTimelineSvg: SVGSVGElement;
-	let miniG: d3.Selection<SVGGElement, unknown, null, undefined>;
-
-	function renderMiniTimeline() {
-		if (!miniTimelineSvg || !baseXScale || width === 0) return;
-
-		const xScale = zoomTransform.rescaleX(baseXScale);
-		
-		if (!miniG) {
-			miniG = d3.select(miniTimelineSvg).append('g');
-		}
-		
-		miniG.selectAll('*').remove();
-		
-		const miniWidth = width - margin.left - margin.right;
-		const miniScale = d3.scaleLinear()
-			.domain([MIN_YEAR, MAX_YEAR])
-			.range([0, miniWidth]);
-
-		// Mini axis
-		const miniAxis = d3.axisBottom(miniScale)
-			.tickFormat(d3.format('d'))
-			.ticks(Math.min(10, Math.floor(miniWidth / 60)));
-
-		miniG.append('g')
-			.attr('transform', `translate(${margin.left}, 30)`)
-			.call(miniAxis as any)
-			.selectAll('text')
-			.attr('fill', '#6b7280')
-			.attr('font-size', '10px');
-
-		// Viewport indicator
-		const viewStart = Math.max(MIN_YEAR, xScale.invert(margin.left));
-		const viewEnd = Math.min(MAX_YEAR, xScale.invert(width - margin.right));
-		const viewStartX = miniScale(viewStart);
-		const viewEndX = miniScale(viewEnd);
-
-		if (viewEndX > viewStartX) {
-			miniG.append('rect')
-				.attr('x', margin.left + viewStartX)
-				.attr('y', 0)
-				.attr('width', viewEndX - viewStartX)
-				.attr('height', 30)
-				.attr('fill', 'rgba(59, 130, 246, 0.2)')
-				.attr('stroke', '#3b82f6')
-				.attr('stroke-width', 2)
-				.attr('cursor', 'pointer')
-				.on('click', (event) => {
-					const clickX = d3.pointer(event, miniTimelineSvg)[0] - margin.left;
-					const targetYear = Math.max(MIN_YEAR, Math.min(MAX_YEAR, miniScale.invert(clickX)));
-					const targetX = baseXScale(targetYear);
-					const centerX = width / 2;
-					const translateX = (centerX - targetX) / zoomTransform.k;
-					
-					zoomTransform = zoomTransform.translate(translateX, 0);
-					d3.select(svg).call(zoom.transform as any, zoomTransform);
-					render();
-					renderMiniTimeline();
-				});
-		}
-
-		// Clickable background
-		miniG.append('rect')
-			.attr('x', margin.left)
-			.attr('y', 0)
-			.attr('width', miniWidth)
-			.attr('height', 60)
-			.attr('fill', 'transparent')
-			.attr('cursor', 'pointer')
-			.on('click', (event) => {
-				const clickX = d3.pointer(event, miniTimelineSvg)[0] - margin.left;
-				const targetYear = Math.max(MIN_YEAR, Math.min(MAX_YEAR, miniScale.invert(clickX)));
-				const targetX = baseXScale(targetYear);
-				const centerX = width / 2;
-				const translateX = (centerX - targetX) / zoomTransform.k;
-				
-				zoomTransform = zoomTransform.translate(translateX, 0);
-				d3.select(svg).call(zoom.transform as any, zoomTransform);
-				render();
-				renderMiniTimeline();
-			});
-	}
 
 	function zoomIn() {
 		if (!svg) return;
@@ -332,7 +287,7 @@
 		zoomTransform = zoomTransform.scale(newK);
 		d3.select(svg).call(zoom.transform as any, zoomTransform);
 		render();
-		renderMiniTimeline();
+		updateZoomSlider();
 	}
 
 	function zoomOut() {
@@ -341,7 +296,29 @@
 		zoomTransform = zoomTransform.scale(newK);
 		d3.select(svg).call(zoom.transform as any, zoomTransform);
 		render();
-		renderMiniTimeline();
+		updateZoomSlider();
+	}
+
+	function handleZoomSliderChange(event: Event) {
+		const target = event.target as HTMLInputElement;
+		const value = parseFloat(target.value);
+		// Map slider value (0-100) to zoom scale (0.5-20)
+		const minK = 0.5;
+		const maxK = 20;
+		const newK = minK + (value / 100) * (maxK - minK);
+		zoomTransform = zoomTransform.scale(newK / zoomTransform.k);
+		d3.select(svg).call(zoom.transform as any, zoomTransform);
+		render();
+	}
+
+	function updateZoomSlider() {
+		if (typeof window === 'undefined') return;
+		const slider = document.getElementById('zoom-slider') as HTMLInputElement;
+		if (!slider) return;
+		const minK = 0.5;
+		const maxK = 20;
+		const value = ((zoomTransform.k - minK) / (maxK - minK)) * 100;
+		slider.value = value.toString();
 	}
 
 	onMount(() => {
@@ -351,7 +328,6 @@
 			updateDimensions();
 			if (g && baseXScale) {
 				render();
-				renderMiniTimeline();
 			}
 		});
 		
@@ -359,14 +335,33 @@
 			resizeObserver.observe(container);
 		}
 		
-		setTimeout(() => {
+		// Also observe parent for height changes
+		if (container?.parentElement) {
+			resizeObserver.observe(container.parentElement);
+		}
+		
+		// Initialize g when element is available
+		if (gElement) {
+			g = d3.select(gElement);
+		}
+		
+		// Use requestAnimationFrame for proper timing
+		requestAnimationFrame(() => {
 			updateDimensions();
 			initializeZoom();
 			if (g) {
 				render();
-				renderMiniTimeline();
+				updateZoomSlider();
 			}
-		}, 100);
+			
+			// Force another render after layout stabilizes
+			setTimeout(() => {
+				updateDimensions();
+				if (g && baseXScale && width > 0 && height > 0) {
+					render();
+				}
+			}, 200);
+		});
 
 		return () => {
 			resizeObserver.disconnect();
@@ -375,39 +370,57 @@
 
 	$: if (people.length > 0 && g && baseXScale && width > 0) {
 		render();
-		renderMiniTimeline();
+		updateZoomSlider();
 	}
 </script>
 
-<div class="timeline-container" bind:this={container}>
-	<svg bind:this={svg}>
-		<g bind:this={g}></g>
-	</svg>
-	
-	<!-- Zoom controls -->
-	<div class="zoom-controls">
-		<button class="zoom-btn" on:click={zoomIn} title="Zoom in">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-				<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-			</svg>
-		</button>
-		<button class="zoom-btn" on:click={zoomOut} title="Zoom out">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-				<path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-			</svg>
-		</button>
+<div class="timeline-wrapper">
+	<div class="timeline-container" bind:this={container}>
+		<svg bind:this={svg}>
+			<g bind:this={gElement}></g>
+		</svg>
+		
+		<!-- Zoom controls -->
+		<div class="zoom-controls">
+			<button class="zoom-btn" on:click={zoomIn} title="Zoom in">
+				<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+					<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+				</svg>
+			</button>
+			<div class="zoom-slider-container">
+				<input
+					id="zoom-slider"
+					type="range"
+					min="0"
+					max="100"
+					value="0"
+					class="zoom-slider"
+					on:input={handleZoomSliderChange}
+					title="Zoom level"
+				/>
+			</div>
+			<button class="zoom-btn" on:click={zoomOut} title="Zoom out">
+				<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+					<path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+				</svg>
+			</button>
+		</div>
 	</div>
-</div>
 
-<!-- Mini timeline -->
-<div class="mini-timeline-container">
-	<svg bind:this={miniTimelineSvg} class="mini-timeline-svg"></svg>
 </div>
 
 <style>
-	.timeline-container {
+	.timeline-wrapper {
 		width: 100%;
 		height: 100%;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.timeline-container {
+		width: 100%;
+		flex: 1;
+		min-height: 0;
 		position: relative;
 		background: #faf9f6;
 		overflow: hidden;
@@ -434,9 +447,47 @@
 		background: white;
 		border-radius: 2px;
 		box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-		overflow: hidden;
+		overflow: visible;
 		z-index: 10;
 		border: 1px solid #e5e7eb;
+	}
+
+	.zoom-slider-container {
+		padding: 4px 8px;
+		background: white;
+		border-top: 1px solid #e5e7eb;
+		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.zoom-slider {
+		width: 20px;
+		height: 120px;
+		writing-mode: vertical-lr;
+		direction: rtl;
+		cursor: pointer;
+		accent-color: #374151;
+		-webkit-appearance: none;
+		appearance: none;
+		background: transparent;
+	}
+
+	.zoom-slider::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		appearance: none;
+		width: 12px;
+		height: 12px;
+		background: #374151;
+		border-radius: 50%;
+		cursor: pointer;
+	}
+
+	.zoom-slider::-moz-range-thumb {
+		width: 12px;
+		height: 12px;
+		background: #374151;
+		border-radius: 50%;
+		cursor: pointer;
+		border: none;
 	}
 
 	.zoom-btn {
@@ -471,18 +522,6 @@
 		height: 16px;
 	}
 
-	.mini-timeline-container {
-		width: 100%;
-		height: 70px;
-		background: white;
-		border-top: 1px solid #e5e7eb;
-		padding: 10px 0;
-	}
-
-	.mini-timeline-svg {
-		width: 100%;
-		height: 100%;
-	}
 
 	:global(.person-row) {
 		pointer-events: none;
