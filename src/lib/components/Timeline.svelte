@@ -23,8 +23,8 @@
 
     const MIN_YEAR = 700;
     const MAX_YEAR = 2026;
-    const ROW_HEIGHT = 36; // Slightly taller for better readability
-    const BAR_HEIGHT = 28;
+    const ROW_HEIGHT = 24; // Compact height
+    const BAR_HEIGHT = 18;
     // Split margins
     const margin = { top: 20, right: 80, bottom: 20, left: 150 }; // For main content
     const axisMargin = { top: 0, right: 80, bottom: 0, left: 150 }; // For axis
@@ -41,39 +41,98 @@
     let zoomTransform: d3.ZoomTransform = d3.zoomIdentity;
     let hoveredPerson: Person | null = null;
 
+    function getProminenceThreshold(zoomScale: number): number {
+        const minK = 1;
+        const maxK = 20;
+        const clamped = Math.max(minK, Math.min(maxK, zoomScale));
+        const ratio = (clamped - minK) / (maxK - minK);
+        // Start strict (80) go to lenient (0)
+        return Math.round(80 - ratio * 80);
+    }
+
+    function packLanes(
+        people: Person[],
+        xScale: d3.ScaleLinear<number, number>,
+    ): (Person & { laneIndex: number })[] {
+        const lanes: number[] = []; // stores pixel end position of the last person in each lane
+        const packed: (Person & { laneIndex: number })[] = [];
+        const minPixelGap = 15; // Minimum gap between names
+
+        // Sort by birth year to ensure linear placement
+        const sorted = [...people].sort((a, b) => a.birthYear - b.birthYear);
+
+        for (const p of sorted) {
+            const birthX = xScale(p.birthYear);
+            const deathX = xScale(p.deathYear || currentYear);
+            const labelWidthEstimate = p.name.length * 7 + 20; // Rough calc for label width
+            // The item effectively ends at the visual scale end OR the label end, whichever is further
+            // But sticky labels mean label stays visible.
+            // Simplified: we just care about segment overlap + a simplified gap for now.
+            // User said: "one segment stopping before the next".
+
+            // Let's use simple segment end for packing, we can refine for labels later if needed.
+            // Actually, if we want to avoid text overlap, we should consider it, but let's start with strict segment packing.
+            const endX = deathX + minPixelGap;
+
+            let placed = false;
+
+            // Try to fit in existing lanes
+            for (let i = 0; i < lanes.length; i++) {
+                if (lanes[i] <= birthX) {
+                    lanes[i] = endX;
+                    packed.push({ ...p, laneIndex: i });
+                    placed = true;
+                    break;
+                }
+            }
+
+            // If not placed, create new lane
+            if (!placed) {
+                lanes.push(endX);
+                packed.push({ ...p, laneIndex: lanes.length - 1 });
+            }
+        }
+        return packed;
+    }
+
     function getVisiblePeople(
         people: Person[],
         zoomTransform: d3.ZoomTransform,
         width: number,
         height: number,
-    ): Person[] {
+    ): (Person & { laneIndex: number })[] {
         if (people.length === 0 || !baseXScale || height === 0) return [];
 
         const currentXScale = zoomTransform.rescaleX(baseXScale);
         const [minYear, maxYear] = currentXScale.domain();
 
-        // 1. Filter by Time Range (Visible Domain)
-        // We add a buffer so bars don't pop in/out abruptly
+        // 1. Filter by Time Range (Visible Domain) with buffer
         let candidates = people.filter((p) => {
             const birth = p.birthYear;
             const death = p.deathYear || currentYear;
-            return death >= minYear - 20 && birth <= maxYear + 20;
+            return death >= minYear - 50 && birth <= maxYear + 50;
         });
 
-        // 2. Sort candidates by prominence descending
-        // Important: We prioritize showcasing the most famous people in the current view
-        candidates.sort((a, b) => b.prominenceScore - a.prominenceScore);
+        // 2. Filter by Prominence (Dynamic)
+        // Since we pack lanes, we can afford to show more people.
+        // We lower the threshold slightly to allow density filling.
+        const zoomScale = zoomTransform.k;
+        const threshold = getProminenceThreshold(zoomScale) * 0.7; // 30% more lenient
 
-        // 3. Limit to what fits in the viewport
+        candidates = candidates.filter((p) => p.prominenceScore >= threshold);
+
+        // 3. Pack into lanes
+        // This assigns laneIndex to everyone based on their time
+        const packed = packLanes(candidates, currentXScale);
+
+        // 4. Limit to Viewport Height
         const maxRows = Math.floor(
             (height - margin.top - margin.bottom) / ROW_HEIGHT,
         );
-        // Ensure at least 5 rows if possible
-        const limit = Math.max(5, maxRows);
-        const visible = candidates.slice(0, limit);
 
-        // 4. Sort by birth year for display
-        return visible.sort((a, b) => a.birthYear - b.birthYear);
+        // Return only those who fit in the visible lanes
+        // We sort by laneIndex to render top-down
+        return packed.filter((p) => p.laneIndex < maxRows);
     }
 
     function updateDimensions() {
@@ -182,8 +241,8 @@
         const rowsEnter = rows.enter().append("g").attr("class", "person-row");
         const rowsMerged = rowsEnter.merge(rows as any);
 
-        rowsMerged.attr("transform", (d, i) => {
-            const y = margin.top + i * ROW_HEIGHT;
+        rowsMerged.attr("transform", (d) => {
+            const y = margin.top + d.laneIndex * ROW_HEIGHT;
             return `translate(0, ${y})`;
         });
 
