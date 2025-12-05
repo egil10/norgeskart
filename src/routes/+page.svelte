@@ -12,26 +12,6 @@
     let selectedPerson: Person | null = null;
     let isPanelOpen = false;
 
-    // Filter to explorers only
-    $: explorerPeople = allPeopleData.filter((p) => {
-        const occs = p.occupations.map((o) => o.toLowerCase()).join(" ");
-        const name = p.name.toLowerCase();
-        const summary = (p.summary || "").toLowerCase();
-
-        const isExplorer =
-            occs.includes("explorer") ||
-            occs.includes("utforsker") ||
-            occs.includes("polar") ||
-            name.includes("amundsen") ||
-            name.includes("nansen") ||
-            name.includes("heyerdahl") ||
-            summary.includes("explorer") ||
-            summary.includes("polar") ||
-            summary.includes("expedition");
-
-        return isExplorer;
-    });
-
     function handlePersonClick(person: Person) {
         selectedPerson = person;
         isPanelOpen = true;
@@ -63,10 +43,11 @@
     <header class="header">
         <div class="header-content">
             <div>
-                <h1 class="title">Norwegian Explorers Timeline</h1>
+                <h1 class="title">Norwegian Historical Figures</h1>
                 <p class="subtitle">
-                    Interactive timeline • {explorerPeople.length} explorers from
-                    {Math.min(...explorerPeople.map((p) => p.birthYear))} to present
+                    Interactive timeline • {allPeopleData.length} people from {Math.min(
+                        ...allPeopleData.map((p) => p.birthYear),
+                    )} to present
                 </p>
             </div>
         </div>
@@ -74,13 +55,13 @@
 
     <!-- Main Timeline -->
     <main class="main-content">
-        <Timeline people={explorerPeople} onPersonClick={handlePersonClick} />
+        <Timeline people={allPeopleData} onPersonClick={handlePersonClick} />
 
         <!-- Person Panel -->
         <PersonPanel
             person={selectedPerson}
             bind:isOpen={isPanelOpen}
-            allPeople={explorerPeople}
+            allPeople={allPeopleData}
         />
     </main>
 
@@ -88,7 +69,7 @@
     <footer class="footer">
         <div class="footer-content">
             <div class="footer-text">
-                <p>Norwegian Explorers • Data from Wikidata</p>
+                <p>Norwegian Historical Figures • Data from Wikidata</p>
             </div>
             <div class="footer-links">
                 <a
@@ -127,12 +108,7 @@
         height: 100%;
         width: 100%;
         overflow: hidden;
-        font-family:
-            "Inter",
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     :global(#app) {
@@ -150,10 +126,10 @@
     }
 
     .header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 20px 32px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        background: white;
+        color: black;
+        padding: 16px 24px;
+        border-bottom: 1px solid #e5e7eb;
         flex-shrink: 0;
         z-index: 10;
     }
@@ -164,17 +140,17 @@
     }
 
     .title {
-        font-size: 28px;
-        font-weight: 700;
+        font-size: 20px;
+        font-weight: 600;
         margin: 0 0 4px 0;
-        letter-spacing: -0.02em;
+        color: black;
     }
 
     .subtitle {
-        font-size: 14px;
+        font-size: 13px;
         margin: 0;
-        opacity: 0.95;
-        font-weight: 500;
+        color: #6b7280;
+        font-weight: 400;
     }
 
     .main-content {
@@ -187,7 +163,7 @@
     .footer {
         background: white;
         border-top: 1px solid #e5e7eb;
-        padding: 12px 32px;
+        padding: 10px 24px;
         flex-shrink: 0;
         z-index: 10;
     }
@@ -202,9 +178,9 @@
 
     .footer-text p {
         margin: 0;
-        font-size: 13px;
+        font-size: 12px;
         color: #6b7280;
-        font-weight: 500;
+        font-weight: 400;
     }
 
     .footer-links {
@@ -219,12 +195,12 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 8px;
-        border-radius: 6px;
+        padding: 6px;
+        border-radius: 4px;
     }
 
     .footer-link:hover {
-        color: #2563eb;
-        background: #eff6ff;
+        color: black;
+        background: #f3f4f6;
     }
 </style>
