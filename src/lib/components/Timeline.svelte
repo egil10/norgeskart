@@ -13,7 +13,7 @@
     import type { Person } from "../types";
     import { palette } from "../theme/palette";
 
-    const MIN_YEAR = 700;
+    const MIN_YEAR = 600;
     const MAX_YEAR = 2100;
     const TOTAL_YEARS = MAX_YEAR - MIN_YEAR;
 
@@ -59,7 +59,7 @@
         const minYearPixel = baseXScale(MIN_YEAR);
         const minTx = margin.left - minYearPixel * k;
         
-        // Ensure we're at the leftmost valid position (year 700)
+        // Ensure we're at the leftmost valid position (year 600)
         select(mainSvg).call(
             zoom.transform as any,
             zoomIdentity.translate(minTx, zoomTransform.y).scale(k),
@@ -253,8 +253,15 @@
 
         zoom.scaleExtent([minK, maxK]);
         
+        // Set the extent to the SVG bounds - this defines the pannable area
+        const svgHeight = mainSvg ? mainSvg.getBoundingClientRect().height : height || 1000;
+        zoom.extent([
+            [0, 0],
+            [width, svgHeight]
+        ]);
+        
         // Calculate translateExtent based on current zoom level
-        // This constrains panning naturally without teleporting
+        // This constrains panning to keep MIN_YEAR and MAX_YEAR within view
         const currentK = zoomTransform?.k || minK;
         const minYearPixel = baseXScale(MIN_YEAR);
         const maxYearPixel = baseXScale(MAX_YEAR);
@@ -264,10 +271,13 @@
         const minTx = margin.left - minYearPixel * currentK;
         const maxTx = width - margin.right - maxYearPixel * currentK;
         
-        zoom.translateExtent([
-            [minTx, -Infinity],
-            [maxTx, Infinity],
-        ]);
+        // Ensure minTx <= maxTx (should always be true, but safety check)
+        if (minTx <= maxTx) {
+            zoom.translateExtent([
+                [minTx, -Infinity],
+                [maxTx, Infinity],
+            ]);
+        }
     }
 
     function initializeZoom() {
@@ -287,7 +297,7 @@
                     event.type === "mousemove" || event.type === "touchmove" ||
                     event.type === "mouseup" || event.type === "touchend")
                     return true;
-                // Only allow wheel zoom with modifier keys
+                // Only allow wheel zoom with modifier keys (Ctrl/Cmd + wheel)
                 if (event.type === "wheel")
                     return event.ctrlKey || event.metaKey;
                 return false;
@@ -296,38 +306,40 @@
                 const oldK = zoomTransform.k;
                 zoomTransform = event.transform;
 
-                // Update translate extents when zoom level changes
+                // Only update translate extents when zoom level (scale) changes
+                // Don't update during panning to avoid teleporting
                 if (Math.abs(oldK - zoomTransform.k) > 0.001) {
                     updateZoomExtents();
                     recalculateLayout();
                 } else {
-                    // Also update translateExtent on pan to keep constraints current
-                    // But do it in a way that doesn't interfere with dragging
-                    requestAnimationFrame(() => {
-                        updateZoomExtents();
-                    });
+                    // Just update render state during panning
                     updateRenderState();
                 }
             });
-
-        updateZoomExtents();
 
         // Transform to initial state - show fewer years initially to get more people visible
         // Use 400 years instead of 600 to lower the prominence threshold and show more people
         const initialVisibleYears = 400;
         const initialK = TOTAL_YEARS / initialVisibleYears;
 
-        // Center view roughly on modern times if possible, or 1900
+        // Set initial transform before calculating extents
         const centerYear = 1900;
         const centerX = baseXScale(centerYear);
         const centerView = width / 2;
         const tX = centerView - centerX * initialK;
+        
+        // Set initial transform state
+        zoomTransform = zoomIdentity.translate(tX, 0).scale(initialK);
+        
+        // Now update extents with the correct initial transform
+        updateZoomExtents();
 
+        // Apply the zoom behavior and initial transform
         select(mainSvg)
             .call(zoom as any)
             .call(
                 zoom.transform as any,
-                zoomIdentity.translate(tX, 0).scale(initialK),
+                zoomTransform,
             );
     }
 
@@ -507,31 +519,9 @@
             ?.removeAttribute("filter");
     }
 
-    function handleWheel(e: WheelEvent) {
-        if (e.ctrlKey || e.metaKey) return; // Leave Zoom to D3 loop
-
-        // Horizontal scroll intent -> Virtual Pan
-        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-            e.preventDefault();
-            const current = zoomTransform;
-            let newTx = current.x - e.deltaX;
-
-            // Clamp to bounds before applying
-            if (baseXScale) {
-                const minYearPixel = baseXScale(MIN_YEAR);
-                const maxYearPixel = baseXScale(MAX_YEAR);
-                const minTx = margin.left - minYearPixel * current.k;
-                const maxTx = width - margin.right - maxYearPixel * current.k;
-                newTx = Math.max(minTx, Math.min(maxTx, newTx));
-            }
-
-            select(mainSvg).call(
-                zoom.transform as any,
-                zoomIdentity.translate(newTx, current.y).scale(current.k),
-            );
-        }
-        // Vertical scroll -> Native overflow behavior
-    }
+    // No wheel handler needed - let browser handle vertical scrolling natively
+    // Horizontal panning is done via drag (grab and drag)
+    // Zoom is handled by D3 with Ctrl/Cmd + wheel
 
     // Calculated Grid Lines
     $: gridLines = baseXScale
@@ -540,7 +530,7 @@
 </script>
 
 <div class="timeline-app">
-    <div class="main-viewport" bind:this={viewport} on:wheel={handleWheel}>
+    <div class="main-viewport" bind:this={viewport}>
         <!-- SVG Height: Cap strictly at visible lanes -->
         <svg
             bind:this={mainSvg}
