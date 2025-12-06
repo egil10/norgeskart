@@ -101,12 +101,9 @@ export function loadPeople(): Person[] {
 			const wikipediaSlug = extractWikipediaSlug(person.wikipediaUrl);
 			const occupations = person.occupations || [];
 			
-			// Determine color based on primary occupation if not already set
-			let color = person.color;
-			if (!color || color === '#999999' || color === '#999') {
-				const primaryOccupation = occupations[0] || '';
-				color = getColorForOccupation(primaryOccupation);
-			}
+			// Always recalculate color based on primary occupation to use latest palette
+			const primaryOccupation = occupations[0] || '';
+			const color = getColorForOccupation(primaryOccupation);
 			
 			return {
 				id: person.id,

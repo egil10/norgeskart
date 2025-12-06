@@ -1,21 +1,21 @@
 import { mapOccupationToFamily } from './occupations';
 
 export const occupationColors: Record<string, string> = {
-	// Modern, vibrant color palette with good contrast and visual appeal
-	artist: '#FF6B6B',        // Warm coral red - vibrant and creative
-	writer: '#9B59B6',       // Rich purple - literary and thoughtful
-	politician: '#3498DB',   // Clear blue - trustworthy and authoritative
-	scientist: '#1ABC9C',    // Teal - modern and scientific
-	athlete: '#E74C3C',      // Energetic red - dynamic and active
-	musician: '#E91E63',     // Pink magenta - expressive and artistic
-	business: '#16A085',     // Deep teal - professional and stable
-	explorer: '#F39C12',     // Golden orange - adventurous and bold
-	actor: '#E67E22',        // Warm orange - dramatic and expressive
-	military: '#34495E',     // Dark slate - strong and disciplined
-	religious: '#8E44AD',    // Deep purple - spiritual and contemplative
-	academic: '#2980B9',      // Professional blue - intellectual and scholarly
-	engineer: '#27AE60',     // Fresh green - technical and innovative
-	default: '#95A5A6'      // Neutral gray - balanced and unobtrusive
+	// New color palette with red, blue, and neutral tones
+	artist: '#FF6A70',        // Soft pink-red - vibrant and creative
+	writer: '#00568F',       // Deep blue - literary and thoughtful
+	politician: '#00205B',   // Navy blue - trustworthy and authoritative
+	scientist: '#1B4F8C',    // Medium blue - modern and scientific
+	athlete: '#D9381E',      // Bright red - dynamic and active
+	musician: '#CF2F45',     // Rose red - expressive and artistic
+	business: '#3A7CAD',     // Sky blue - professional and stable
+	explorer: '#2D6AB0',     // Ocean blue - adventurous and bold
+	actor: '#BA0C2F',        // Deep red - dramatic and expressive
+	military: '#8B1E2D',     // Dark red - strong and disciplined
+	religious: '#6A0F1B',    // Deep burgundy - spiritual and contemplative
+	academic: '#5DA9E9',     // Light blue - intellectual and scholarly
+	engineer: '#E6E6E6',     // Light gray - technical and innovative
+	default: '#BFC5CA'       // Neutral gray - balanced and unobtrusive
 };
 
 export function getColorForOccupation(occupation: string): string {

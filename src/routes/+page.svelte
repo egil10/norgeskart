@@ -215,7 +215,7 @@
                         </button>
                         <button
                             class="control-btn"
-                            title="Scroll to start (600)"
+                            title="Scroll left 50 years"
                             on:click={() => timelineComponent?.scrollToLeft()}
                         >
                             <svg
@@ -234,7 +234,7 @@
                         </button>
                         <button
                             class="control-btn"
-                            title="Scroll to end (2100)"
+                            title="Scroll right 50 years"
                             on:click={() => timelineComponent?.scrollToRight()}
                         >
                             <svg

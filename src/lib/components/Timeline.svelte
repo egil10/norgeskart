@@ -53,30 +53,42 @@
     }
 
     export function scrollToLeft() {
-        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        if (!mainSvg || !zoom || !baseXScale || width === 0 || !zoomTransform) return;
         
         const k = zoomTransform.k;
-        const minYearPixel = baseXScale(MIN_YEAR);
-        const minTx = margin.left - minYearPixel * k;
+        const currentScale = zoomTransform.rescaleX(baseXScale);
+        const centerX = width / 2;
+        const currentCenterYear = currentScale.invert(centerX);
         
-        // Ensure we're at the leftmost valid position (year 600)
+        // Scroll left by 50 years
+        const newCenterYear = Math.max(MIN_YEAR, currentCenterYear - 50);
+        const newCenterX = baseXScale(newCenterYear);
+        const centerView = width / 2;
+        const tX = centerView - newCenterX * k;
+        
         select(mainSvg).call(
             zoom.transform as any,
-            zoomIdentity.translate(minTx, zoomTransform.y).scale(k),
+            zoomIdentity.translate(tX, zoomTransform.y).scale(k),
         );
     }
 
     export function scrollToRight() {
-        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        if (!mainSvg || !zoom || !baseXScale || width === 0 || !zoomTransform) return;
         
         const k = zoomTransform.k;
-        const maxYearPixel = baseXScale(MAX_YEAR);
-        const maxTx = width - margin.right - maxYearPixel * k;
+        const currentScale = zoomTransform.rescaleX(baseXScale);
+        const centerX = width / 2;
+        const currentCenterYear = currentScale.invert(centerX);
         
-        // Ensure we're at the rightmost valid position (year 2100)
+        // Scroll right by 50 years
+        const newCenterYear = Math.min(MAX_YEAR, currentCenterYear + 50);
+        const newCenterX = baseXScale(newCenterYear);
+        const centerView = width / 2;
+        const tX = centerView - newCenterX * k;
+        
         select(mainSvg).call(
             zoom.transform as any,
-            zoomIdentity.translate(maxTx, zoomTransform.y).scale(k),
+            zoomIdentity.translate(tX, zoomTransform.y).scale(k),
         );
     }
 
@@ -637,9 +649,19 @@
     // Horizontal panning is done via drag (grab and drag)
     // Zoom is handled by D3 with Ctrl/Cmd + wheel
 
-    // Calculated Grid Lines
-    $: gridLines = baseXScale
+    // Calculated Grid Lines - separate arrays for different intervals
+    $: gridLines100 = baseXScale
         ? range(Math.ceil(MIN_YEAR / 100) * 100, MAX_YEAR + 1, 100)
+        : [];
+    $: gridLines50 = baseXScale
+        ? range(Math.ceil(MIN_YEAR / 50) * 50, MAX_YEAR + 1, 50).filter(
+            (year) => year % 100 !== 0 // Exclude 100-year marks
+        )
+        : [];
+    $: gridLines25 = baseXScale
+        ? range(Math.ceil(MIN_YEAR / 25) * 25, MAX_YEAR + 1, 25).filter(
+            (year) => year % 50 !== 0 // Exclude 50-year and 100-year marks
+        )
         : [];
 </script>
 
@@ -667,8 +689,21 @@
                     style="pointer-events: all;"
                 />
 
-                <!-- Grid -->
-                {#each gridLines as year}
+                <!-- Grid - 25 year lines (quite thin) -->
+                {#each gridLines25 as year}
+                    <line
+                        x1={curX(year)}
+                        x2={curX(year)}
+                        y1="0"
+                        y2="100%"
+                        stroke="#e5e7eb"
+                        stroke-width="0.5"
+                        style="pointer-events: none;"
+                    />
+                {/each}
+                
+                <!-- Grid - 50 year lines (thin) -->
+                {#each gridLines50 as year}
                     <line
                         x1={curX(year)}
                         x2={curX(year)}
@@ -676,6 +711,19 @@
                         y2="100%"
                         stroke="#e5e7eb"
                         stroke-width="1"
+                        style="pointer-events: none;"
+                    />
+                {/each}
+                
+                <!-- Grid - 100 year lines (thicker) -->
+                {#each gridLines100 as year}
+                    <line
+                        x1={curX(year)}
+                        x2={curX(year)}
+                        y1="0"
+                        y2="100%"
+                        stroke="#e5e7eb"
+                        stroke-width="2"
                         style="pointer-events: none;"
                     />
                 {/each}
@@ -798,29 +846,20 @@
     /* Load More Button Floating at bottom of viewport */
     .load-more-container {
         position: sticky;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        display: flex;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: inline-flex;
         justify-content: center;
-        align-items: flex-end;
+        align-items: center;
         pointer-events: none; /* Let clicks pass through empty space */
         z-index: 10;
-        /* Blur background or gradient to make it readable over content */
-        background: linear-gradient(
-            to top,
-            rgba(250, 249, 246, 0.95) 20%,
-            transparent
-        );
-        padding-bottom: 20px;
-        padding-top: 40px;
-        min-height: 0;
+        width: auto;
     }
 
     @media (max-width: 768px) {
         .load-more-container {
-            padding-bottom: 16px;
-            padding-top: 32px;
+            bottom: 16px;
         }
     }
     .load-more-btn {
