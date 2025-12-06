@@ -157,11 +157,11 @@
                         on:keydown={(e) => e.key === 'Enter' && timelineComponent?.resetView()}
                         role="button"
                         tabindex="0"
-                    >Norwegian Historical Figures</h1>
+                    >Norske historiske personer</h1>
                     <p class="subtitle">
-                        Timeline of {allPeopleData.length} famous Norwegians from {Math.min(
-                            ...allPeopleData.map((p) => p.birthYear),
-                        )} to present
+                        Tidslinje med {filteredPeople.length} kjente nordmenn fra {filteredPeople.length > 0 ? Math.min(
+                            ...filteredPeople.map((p) => p.birthYear),
+                        ) : 0} til i dag
                     </p>
                 </div>
                 <div class="header-controls-section">
@@ -326,14 +326,6 @@
                     </a>
                 </div>
             </div>
-            {#if showFilter}
-                <div class="filter-container">
-                    <CategoryFilter
-                        selectedCategories={selectedCategories}
-                        onCategoriesChange={handleCategoriesChange}
-                    />
-                </div>
-            {/if}
         </div>
     </header>
 
@@ -355,6 +347,17 @@
         <!-- Scroll to Top Button -->
         <ScrollToTop />
     </main>
+
+    <!-- Filter Popup -->
+    {#if showFilter}
+        <div class="filter-popup">
+            <CategoryFilter
+                selectedCategories={selectedCategories}
+                onCategoriesChange={handleCategoriesChange}
+                onClose={() => showFilter = false}
+            />
+        </div>
+    {/if}
 
 </div>
 
@@ -510,27 +513,6 @@
         transform: scale(0.95);
     }
 
-    .filter-container {
-        margin-top: 16px;
-        animation: slideDown 0.2s ease;
-    }
-
-    @media (max-width: 768px) {
-        .filter-container {
-            margin-top: 12px;
-        }
-    }
-
-    @keyframes slideDown {
-        from {
-            opacity: 0;
-            transform: translateY(-8px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
 
     .title {
         font-size: 20px;
@@ -692,6 +674,45 @@
         background: #e5e7eb;
         height: 4px;
         border-radius: 2px;
+    }
+
+    /* Filter Popup */
+    .filter-popup {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        width: 280px;
+        max-height: calc(100vh - 100px);
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        animation: popupIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+        border: 1px solid #e5e7eb;
+    }
+
+    @keyframes popupIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px) scale(0.95);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+
+    @media (max-width: 768px) {
+        .filter-popup {
+            top: 70px;
+            right: 10px;
+            left: 10px;
+            width: auto;
+            max-height: calc(100vh - 90px);
+        }
     }
 
 </style>

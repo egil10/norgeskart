@@ -5,6 +5,7 @@
 
 	export let selectedCategories: Set<string> = new Set(allOccupations);
 	export let onCategoriesChange: (categories: Set<string>) => void = () => {};
+	export let onClose: (() => void) | undefined = undefined;
 
 	let pendingCategories: Set<string> = new Set(selectedCategories);
 	let hasChanges = false;
@@ -75,6 +76,9 @@
 		selectedCategories = new Set(pendingCategories);
 		onCategoriesChange(new Set(pendingCategories));
 		hasChanges = false;
+		if (onClose) {
+			onClose();
+		}
 	}
 
 	function resetFilters() {
@@ -85,8 +89,25 @@
 
 <div class="category-filter">
 	<div class="filter-header">
-		<span class="filter-label">Kategorier</span>
-		<div class="filter-actions">
+		<h2 class="filter-title">Filtre</h2>
+		<button class="close-sidebar-btn" on:click={() => onClose?.()} aria-label="Lukk">
+			<svg
+				width="20"
+				height="20"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			>
+				<line x1="18" x2="6" y1="6" y2="18"></line>
+				<line x1="6" x2="18" y1="6" y2="18"></line>
+			</svg>
+		</button>
+	</div>
+	<div class="filter-scrollable">
+		<div class="filter-actions-row">
 			<button class="action-btn" on:click={selectAll} title="Velg alle">
 				Alle
 			</button>
@@ -94,27 +115,23 @@
 				Ingen
 			</button>
 		</div>
-	</div>
-	<div class="filter-buttons">
-		{#each allOccupations as category}
-			{@const isSelected = pendingCategories.has(category)}
-			{@const color = occupationColors[category] || occupationColors.default}
-			<button
-				type="button"
-				class="category-btn"
-				class:selected={isSelected}
-				on:click={() => toggleCategory(category)}
-				style="--category-color: {color};"
-			>
-				<span class="category-indicator" style="background-color: {color};"></span>
-				<span class="category-label">{categoryLabels[category] || category}</span>
-			</button>
-		{/each}
+		<div class="filter-buttons">
+			{#each allOccupations as category}
+				{@const isSelected = pendingCategories.has(category)}
+				{@const color = occupationColors[category] || occupationColors.default}
+				<button
+					type="button"
+					class="category-btn"
+					class:selected={isSelected}
+					on:click={() => toggleCategory(category)}
+					style="--category-color: {color};"
+				>
+					<span class="category-label">{categoryLabels[category] || category}</span>
+				</button>
+			{/each}
+		</div>
 	</div>
 	<div class="filter-footer">
-		{#if hasChanges}
-			<div class="filter-status">Endringer ikke lagret</div>
-		{/if}
 		<div class="filter-apply-actions">
 			{#if hasChanges}
 				<button class="apply-btn reset" on:click={resetFilters} title="Tilbakestill">
@@ -128,19 +145,7 @@
 				disabled={!hasChanges}
 				title="Bruk filtre"
 			>
-				<svg
-					width="14"
-					height="14"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<polyline points="20 6 9 17 4 12" />
-				</svg>
-				<span>Bruk filtre</span>
+				Bruk filtre
 			</button>
 		</div>
 	</div>
@@ -148,106 +153,138 @@
 
 <style>
 	.category-filter {
+		display: flex;
+		flex-direction: column;
 		background: white;
-		border: 1px solid #e5e7eb;
-		border-radius: 12px;
-		padding: 12px;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+		max-height: 80vh;
 	}
 
 	.filter-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 10px;
+		padding: 10px 14px;
+		border-bottom: 1px solid #e5e7eb;
+		flex-shrink: 0;
 	}
 
-	.filter-label {
-		font-size: 12px;
+	.filter-title {
+		font-size: 14px;
 		font-weight: 600;
-		color: #6b7280;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
+		color: #1f2937;
+		margin: 0;
 	}
 
-	.filter-actions {
+	.close-sidebar-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: none;
+		background: transparent;
+		color: #6b7280;
+		border-radius: 4px;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		padding: 0;
+		-webkit-tap-highlight-color: transparent;
+		flex-shrink: 0;
+	}
+
+	.close-sidebar-btn:hover {
+		background: #f9fafb;
+		color: #1f2937;
+	}
+
+	.close-sidebar-btn:active {
+		transform: scale(0.95);
+	}
+
+	.filter-scrollable {
+		flex: 1;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	.filter-actions-row {
 		display: flex;
 		gap: 6px;
+		padding: 8px 14px;
+		flex-shrink: 0;
 	}
 
 	.action-btn {
-		padding: 4px 10px;
+		padding: 5px 10px;
 		font-size: 11px;
 		font-weight: 500;
 		color: #6b7280;
 		background: transparent;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
+		border: none;
+		border-radius: 4px;
 		cursor: pointer;
 		transition: all 0.2s ease;
+		flex: 1;
 	}
 
 	.action-btn:hover {
-		background: #f9fafb;
+		background: white;
 		color: #1f2937;
-		border-color: #d1d5db;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+	}
+
+	.action-btn:active {
+		transform: scale(0.95);
 	}
 
 	.filter-buttons {
+		padding: 0 14px 8px 14px;
 		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
+		flex-direction: column;
+		gap: 3px;
 	}
 
 	.category-btn {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		padding: 6px 12px;
-		font-size: 12px;
+		gap: 8px;
+		padding: 6px 10px;
+		font-size: 11px;
 		font-weight: 500;
 		color: #6b7280;
-		background: #f9fafb;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
+		background: transparent;
+		border: none;
+		border-radius: 4px;
 		cursor: pointer;
 		transition: all 0.2s ease;
 		position: relative;
 		overflow: hidden;
+		text-align: left;
+		-webkit-tap-highlight-color: transparent;
+		width: 100%;
 	}
 
 	.category-btn:hover {
-		background: #f3f4f6;
-		border-color: #d1d5db;
-		transform: translateY(-1px);
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+		background: #f9fafb;
+		color: #1f2937;
 	}
 
 	.category-btn.selected {
 		background: var(--category-color);
 		color: white;
-		border-color: var(--category-color);
-		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 	}
 
 	.category-btn.selected:hover {
+		background: var(--category-color);
 		opacity: 0.9;
-		transform: translateY(-1px);
-		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+	}
+
+	.category-btn:active {
+		transform: scale(0.95);
 	}
 
 	.category-indicator {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		flex-shrink: 0;
-		background-color: var(--category-color);
-		transition: all 0.2s ease;
-	}
-
-	.category-btn.selected .category-indicator {
-		background-color: rgba(255, 255, 255, 0.3);
-		box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+		display: none;
 	}
 
 	.category-label {
@@ -255,35 +292,28 @@
 	}
 
 	.filter-footer {
-		margin-top: 12px;
-		padding-top: 12px;
+		padding: 8px 14px;
 		border-top: 1px solid #e5e7eb;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-	}
-
-	.filter-status {
-		font-size: 11px;
-		color: #f59e0b;
-		font-weight: 500;
+		flex-shrink: 0;
+		background: white;
 	}
 
 	.filter-apply-actions {
 		display: flex;
 		gap: 8px;
-		margin-left: auto;
+		width: 100%;
 	}
 
 	.apply-btn {
 		display: flex;
 		align-items: center;
+		justify-content: center;
 		gap: 6px;
-		padding: 8px 16px;
-		font-size: 12px;
+		padding: 5px 10px;
+		font-size: 11px;
 		font-weight: 500;
-		border-radius: 8px;
+		border-radius: 4px;
 		cursor: pointer;
 		transition: all 0.2s ease;
 		border: 1px solid #e5e7eb;
@@ -292,15 +322,18 @@
 	}
 
 	.apply-btn:hover:not(:disabled) {
-		background: #f3f4f6;
+		background: white;
 		border-color: #d1d5db;
-		transform: translateY(-1px);
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 	}
 
 	.apply-btn:disabled {
-		opacity: 0.5;
+		opacity: 0.4;
 		cursor: not-allowed;
+	}
+
+	.apply-btn:active:not(:disabled) {
+		transform: scale(0.98);
 	}
 
 	.apply-btn.apply {
@@ -313,13 +346,11 @@
 		background: #1f2937;
 		color: white;
 		border-color: #1f2937;
-		box-shadow: 0 2px 6px rgba(31, 41, 55, 0.2);
 	}
 
-	.apply-btn.apply.has-changes:hover {
+	.apply-btn.apply.has-changes:hover:not(:disabled) {
 		background: #374151;
 		border-color: #374151;
-		box-shadow: 0 4px 8px rgba(31, 41, 55, 0.3);
 	}
 
 	.apply-btn.reset {
@@ -332,5 +363,23 @@
 		background: #f9fafb;
 		color: #1f2937;
 		border-color: #d1d5db;
+	}
+
+	@media (max-width: 768px) {
+		.filter-header {
+			padding: 16px 20px;
+		}
+
+		.filter-actions-row {
+			padding: 12px 20px;
+		}
+
+		.filter-buttons {
+			padding: 12px 20px;
+		}
+
+		.filter-footer {
+			padding: 16px 20px;
+		}
 	}
 </style>
