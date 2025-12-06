@@ -83,24 +83,25 @@
 <style>
     .scroll-to-top {
         position: absolute;
-        bottom: 24px;
+        bottom: 48px;
         right: 24px;
         width: 48px;
         height: 48px;
-        border-radius: 50%;
+        border-radius: 8px;
         background: white;
         border: 1px solid #e5e7eb;
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        transition: all 0.2s ease;
         opacity: 0;
         visibility: hidden;
         transform: translateY(10px);
         z-index: 1000;
-        color: #333;
+        color: #1f2937;
+        margin: 0;
     }
 
     .scroll-to-top.visible {
@@ -110,12 +111,14 @@
     }
 
     .scroll-to-top:hover {
-        background: #f3f4f6;
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        background: #f9fafb;
+        border-color: #d1d5db;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
     }
 
     .scroll-to-top:active {
         transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
 </style>

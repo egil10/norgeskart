@@ -150,7 +150,7 @@
         <div class="header-content">
             <div class="header-main">
                 <div class="header-title-section">
-                    <h1 class="title">Norwegian Historical Figures</h1>
+                    <h1 class="title" on:click={() => timelineComponent?.resetView()}>Norwegian Historical Figures</h1>
                     <p class="subtitle">
                         Timeline of {allPeopleData.length} famous Norwegians from {Math.min(
                             ...allPeopleData.map((p) => p.birthYear),
@@ -242,7 +242,7 @@
                             type="range"
                             min="0"
                             max="100"
-                            step="0.1"
+                            step="0.05"
                             value={zoomLevel}
                             on:input={handleZoomInput}
                             on:change={handleZoomChange}
@@ -474,6 +474,17 @@
         font-weight: 600;
         margin: 0 0 4px 0;
         color: black;
+        cursor: pointer;
+        transition: color 0.2s ease;
+        user-select: none;
+    }
+
+    .title:hover {
+        color: #1f2937;
+    }
+
+    .title:active {
+        color: #6b7280;
     }
 
     .subtitle {

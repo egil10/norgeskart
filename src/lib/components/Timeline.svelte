@@ -81,60 +81,50 @@
     }
 
     export function zoomIn() {
-        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        if (!mainSvg || !zoom || !baseXScale || width === 0 || !zoomTransform) return;
         
         const currentK = zoomTransform.k;
         const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS;
-        const newK = Math.min(maxK, currentK * 1.2);
         
-        // Zoom towards center of viewport
+        // Check if we're already at max zoom
+        if (currentK >= maxK) return;
+        
+        // Get the viewport center point
         const centerX = width / 2;
         const centerY = 0;
+        const point = [centerX, centerY] as [number, number];
         
-        // Calculate new transform
-        const scale = newK / currentK;
-        let newTx = centerX - (centerX - zoomTransform.x) * scale;
-        const newTy = centerY - (centerY - zoomTransform.y) * scale;
-        
-        // Clamp to bounds after zoom
-        const minYearPixel = baseXScale(MIN_YEAR);
-        const maxYearPixel = baseXScale(MAX_YEAR);
-        const minTx = margin.left - minYearPixel * newK;
-        const maxTx = width - margin.right - maxYearPixel * newK;
-        newTx = Math.max(minTx, Math.min(maxTx, newTx));
-        
+        // Use D3's scaleBy method which scales by a factor relative to current scale
+        // This keeps the center point fixed, just like Ctrl+wheel zoom
+        // Smaller increment for finer control
         select(mainSvg).call(
-            zoom.transform as any,
-            zoomIdentity.translate(newTx, newTy).scale(newK),
+            zoom.scaleBy as any,
+            1.1,
+            point
         );
     }
 
     export function zoomOut() {
-        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        if (!mainSvg || !zoom || !baseXScale || width === 0 || !zoomTransform) return;
         
         const currentK = zoomTransform.k;
         const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
-        const newK = Math.max(minK, currentK / 1.2);
         
-        // Zoom towards center of viewport
+        // Check if we're already at min zoom
+        if (currentK <= minK) return;
+        
+        // Get the viewport center point
         const centerX = width / 2;
         const centerY = 0;
+        const point = [centerX, centerY] as [number, number];
         
-        // Calculate new transform
-        const scale = newK / currentK;
-        let newTx = centerX - (centerX - zoomTransform.x) * scale;
-        const newTy = centerY - (centerY - zoomTransform.y) * scale;
-        
-        // Clamp to bounds after zoom
-        const minYearPixel = baseXScale(MIN_YEAR);
-        const maxYearPixel = baseXScale(MAX_YEAR);
-        const minTx = margin.left - minYearPixel * newK;
-        const maxTx = width - margin.right - maxYearPixel * newK;
-        newTx = Math.max(minTx, Math.min(maxTx, newTx));
-        
+        // Use D3's scaleBy method which scales by a factor relative to current scale
+        // This keeps the center point fixed, just like Ctrl+wheel zoom
+        // Smaller increment for finer control
         select(mainSvg).call(
-            zoom.transform as any,
-            zoomIdentity.translate(newTx, newTy).scale(newK),
+            zoom.scaleBy as any,
+            1 / 1.1,
+            point
         );
     }
 
@@ -580,8 +570,25 @@
     }
 
     function loadMore() {
-        visibleLaneCount += LOAD_MORE_INCREMENT;
-        updateRenderState();
+        // Use requestAnimationFrame to prevent lag
+        requestAnimationFrame(() => {
+            const previousScrollTop = viewport?.scrollTop || 0;
+            visibleLaneCount += LOAD_MORE_INCREMENT;
+            updateRenderState();
+            
+            // After rendering, scroll down to keep the button visible
+            // Scroll by approximately the height of the newly loaded lanes
+            if (viewport) {
+                requestAnimationFrame(() => {
+                    const scrollAmount = LOAD_MORE_INCREMENT * ROW_HEIGHT;
+                    const newScrollTop = previousScrollTop + scrollAmount;
+                    viewport.scrollTo({
+                        top: newScrollTop,
+                        behavior: 'smooth'
+                    });
+                });
+            }
+        });
     }
 
     // Track mouse down position to distinguish clicks from drags
@@ -720,8 +727,7 @@
         {#if visibleLaneCount <= maxLaneIndex && isNearBottom}
             <div class="load-more-container">
                 <button class="load-more-btn" on:click={loadMore}>
-                    Vis flere personer ({maxLaneIndex - visibleLaneCount + 1} til
-                    skjult)
+                    Vis flere ({maxLaneIndex - visibleLaneCount + 1})
                 </button>
             </div>
         {/if}
@@ -765,6 +771,7 @@
         right: 0;
         display: flex;
         justify-content: center;
+        align-items: flex-end;
         pointer-events: none; /* Let clicks pass through empty space */
         z-index: 10;
         /* Blur background or gradient to make it readable over content */
@@ -775,24 +782,36 @@
         );
         padding-bottom: 20px;
         padding-top: 40px;
+        min-height: 0;
     }
     .load-more-btn {
         pointer-events: auto;
         background: white;
-        border: 1px solid #ccc;
-        padding: 8px 16px;
-        border-radius: 20px;
+        border: 1px solid #e5e7eb;
+        padding: 10px 20px;
+        border-radius: 8px;
         font-size: 13px;
         font-weight: 500;
         cursor: pointer;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        color: #333;
-        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        color: #1f2937;
+        transition: all 0.2s ease;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        height: 48px;
     }
     .load-more-btn:hover {
-        background: #f3f3f3;
+        background: #f9fafb;
+        border-color: #d1d5db;
         transform: translateY(-1px);
-        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+    }
+    .load-more-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
     .person-block {
         cursor: pointer;
