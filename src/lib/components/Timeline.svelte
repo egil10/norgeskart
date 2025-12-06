@@ -41,7 +41,7 @@
         
         const initialVisibleYears = 400;
         const initialK = TOTAL_YEARS / initialVisibleYears;
-        const centerYear = 1900;
+        const centerYear = 1800;
         const centerX = baseXScale(centerYear);
         const centerView = width / 2;
         const tX = centerView - centerX * initialK;
@@ -85,7 +85,7 @@
         
         const currentK = zoomTransform.k;
         const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS;
-        const newK = Math.min(maxK, currentK * 1.5);
+        const newK = Math.min(maxK, currentK * 1.2);
         
         // Zoom towards center of viewport
         const centerX = width / 2;
@@ -114,7 +114,7 @@
         
         const currentK = zoomTransform.k;
         const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
-        const newK = Math.max(minK, currentK / 1.5);
+        const newK = Math.max(minK, currentK / 1.2);
         
         // Zoom towards center of viewport
         const centerX = width / 2;
@@ -210,6 +210,7 @@
     let isInitialLoad = true;
     let currentZoomLevel = 50; // 0-100 percentage
     let fixedCenterYear: number | null = null; // Center year to preserve during zoom drag
+    let isNearBottom = false; // Track if user is scrolled near bottom
 
     // Data State
     type VisiblePerson = Person & { laneIndex: number };
@@ -292,11 +293,29 @@
             }
         });
 
-        if (viewport) {
-            resizeObserver.observe(viewport);
+        // Track scroll position to show/hide load more button
+        function handleScroll() {
+            if (!viewport) return;
+            const scrollTop = viewport.scrollTop;
+            const scrollHeight = viewport.scrollHeight;
+            const clientHeight = viewport.clientHeight;
+            // Show button when within 200px of bottom
+            isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
         }
 
-        return () => resizeObserver.disconnect();
+        if (viewport) {
+            resizeObserver.observe(viewport);
+            viewport.addEventListener('scroll', handleScroll);
+            // Check initial state
+            handleScroll();
+        }
+
+        return () => {
+            resizeObserver.disconnect();
+            if (viewport) {
+                viewport.removeEventListener('scroll', handleScroll);
+            }
+        };
     });
 
     function updateZoomExtents() {
@@ -383,7 +402,7 @@
         const initialK = TOTAL_YEARS / initialVisibleYears;
 
         // Set initial transform before calculating extents
-        const centerYear = 1900;
+        const centerYear = 1800;
         const centerX = baseXScale(centerYear);
         const centerView = width / 2;
         const tX = centerView - centerX * initialK;
@@ -697,8 +716,8 @@
         </svg>
 
         <!-- Load More Overlay -->
-        <!-- Only show if we actually have hidden lanes -->
-        {#if visibleLaneCount <= maxLaneIndex}
+        <!-- Only show if we actually have hidden lanes AND user is scrolled near bottom -->
+        {#if visibleLaneCount <= maxLaneIndex && isNearBottom}
             <div class="load-more-container">
                 <button class="load-more-btn" on:click={loadMore}>
                     Vis flere personer ({maxLaneIndex - visibleLaneCount + 1} til
