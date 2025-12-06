@@ -35,6 +35,93 @@
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     export let onPersonClick: (p: Person) => void = () => {};
 
+    // Expose control functions
+    export function resetView() {
+        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        
+        const initialVisibleYears = 400;
+        const initialK = TOTAL_YEARS / initialVisibleYears;
+        const centerYear = 1900;
+        const centerX = baseXScale(centerYear);
+        const centerView = width / 2;
+        const tX = centerView - centerX * initialK;
+        
+        select(mainSvg).call(
+            zoom.transform as any,
+            zoomIdentity.translate(tX, 0).scale(initialK),
+        );
+    }
+
+    export function scrollToLeft() {
+        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        
+        const k = zoomTransform.k;
+        const minYearPixel = baseXScale(MIN_YEAR);
+        const minTx = margin.left - minYearPixel * k;
+        
+        select(mainSvg).call(
+            zoom.transform as any,
+            zoomIdentity.translate(minTx, zoomTransform.y).scale(k),
+        );
+    }
+
+    export function scrollToRight() {
+        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        
+        const k = zoomTransform.k;
+        const maxYearPixel = baseXScale(MAX_YEAR);
+        const maxTx = width - margin.right - maxYearPixel * k;
+        
+        select(mainSvg).call(
+            zoom.transform as any,
+            zoomIdentity.translate(maxTx, zoomTransform.y).scale(k),
+        );
+    }
+
+    export function zoomIn() {
+        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        
+        const currentK = zoomTransform.k;
+        const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS;
+        const newK = Math.min(maxK, currentK * 1.5);
+        
+        // Zoom towards center of viewport
+        const centerX = width / 2;
+        const centerY = 0;
+        
+        // Calculate new transform
+        const scale = newK / currentK;
+        const newTx = centerX - (centerX - zoomTransform.x) * scale;
+        const newTy = centerY - (centerY - zoomTransform.y) * scale;
+        
+        select(mainSvg).call(
+            zoom.transform as any,
+            zoomIdentity.translate(newTx, newTy).scale(newK),
+        );
+    }
+
+    export function zoomOut() {
+        if (!mainSvg || !zoom || !baseXScale || width === 0) return;
+        
+        const currentK = zoomTransform.k;
+        const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
+        const newK = Math.max(minK, currentK / 1.5);
+        
+        // Zoom towards center of viewport
+        const centerX = width / 2;
+        const centerY = 0;
+        
+        // Calculate new transform
+        const scale = newK / currentK;
+        const newTx = centerX - (centerX - zoomTransform.x) * scale;
+        const newTy = centerY - (centerY - zoomTransform.y) * scale;
+        
+        select(mainSvg).call(
+            zoom.transform as any,
+            zoomIdentity.translate(newTx, newTy).scale(newK),
+        );
+    }
+
     // Elements
     let mainSvg: SVGSVGElement;
     let axisSvg: SVGSVGElement;
@@ -63,11 +150,16 @@
     let visibleLaneCount = INITIAL_VISIBLE_LANES;
     let maxLaneIndex = 0;
 
-    function getPersonColor(id: string): string {
-        const colors = palette.light;
+    function getPersonColor(person: Person): string {
+        // Use the person's color if available (based on occupation)
+        if (person.color) {
+            return person.color;
+        }
+        
+        // Fallback to hash-based color if no color is set
         let hash = 0;
-        for (let i = 0; i < id.length; i++) {
-            hash = id.charCodeAt(i) + ((hash << 5) - hash);
+        for (let i = 0; i < person.id.length; i++) {
+            hash = person.id.charCodeAt(i) + ((hash << 5) - hash);
         }
         const hue = Math.abs(hash % 360);
         return `hsl(${hue}, 65%, 45%)`;
@@ -145,16 +237,21 @@
 
         zoom.scaleExtent([minK, maxK]);
         
-        // Update translate extent based on current zoom level
-        // This constrains panning so we can't scroll past MIN_YEAR and MAX_YEAR
+        // Calculate translate extent to constrain panning to [MIN_YEAR, MAX_YEAR]
+        // translateExtent works in the coordinate space before transform
+        // We need to ensure that after transform, MIN_YEAR is at left edge and MAX_YEAR at right edge
         const currentK = zoomTransform?.k || minK;
         const minYearPixel = baseXScale(MIN_YEAR);
         const maxYearPixel = baseXScale(MAX_YEAR);
         
-        // Calculate bounds for current zoom level
+        // For translateExtent, we calculate the bounds in the base coordinate space
+        // The transform formula is: x' = x * k + tx
+        // We want: margin.left = minYearPixel * k + minTx  => minTx = margin.left - minYearPixel * k
+        // And: width - margin.right = maxYearPixel * k + maxTx => maxTx = width - margin.right - maxYearPixel * k
         const minTx = margin.left - minYearPixel * currentK;
         const maxTx = width - margin.right - maxYearPixel * currentK;
         
+        // Set translateExtent - D3 will automatically clamp translations to these bounds
         zoom.translateExtent([
             [minTx, -Infinity],
             [maxTx, Infinity],
@@ -376,6 +473,8 @@
             const current = zoomTransform;
             const newTx = current.x - e.deltaX;
 
+            // Let D3's translateExtent handle the clamping naturally
+            // This ensures smooth panning while respecting bounds
             select(mainSvg).call(
                 zoom.transform as any,
                 zoomIdentity.translate(newTx, current.y).scale(current.k),
@@ -436,7 +535,7 @@
                             height={BAR_HEIGHT}
                             rx="4"
                             ry="4"
-                            fill={getPersonColor(person.id)}
+                            fill={getPersonColor(person)}
                         />
                         <text
                             x={curX(person.birthYear) +

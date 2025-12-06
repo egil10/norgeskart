@@ -82,7 +82,7 @@
 
 <style>
     .scroll-to-top {
-        position: fixed;
+        position: absolute;
         bottom: 24px;
         right: 24px;
         width: 48px;

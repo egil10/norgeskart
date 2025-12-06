@@ -12,7 +12,8 @@
     "generate:data": "tsx src/lib/data/fetchPeople.ts",
     "generate:data:list": "tsx src/lib/data/fetchPeople.ts --list",
     "generate:data:merge": "tsx src/lib/data/fetchPeople.ts --merge",
-    "generate:wikipedia": "tsx src/lib/data/fetchWikipediaCategories.ts"
+    "generate:wikipedia": "tsx src/lib/data/fetchWikipediaCategories.ts",
+    "remove-duplicates": "tsx scripts/remove-duplicates.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-auto": "^3.0.0",

@@ -12,6 +12,7 @@
     let allPeopleData: Person[] = allPeople;
     let selectedPerson: Person | null = null;
     let isPanelOpen = false;
+    let timelineComponent: Timeline;
 
     function handlePersonClick(person: Person) {
         selectedPerson = person;
@@ -58,7 +59,11 @@
 
     <!-- Main Timeline -->
     <main class="main-content">
-        <Timeline people={allPeopleData} onPersonClick={handlePersonClick} />
+        <Timeline
+            bind:this={timelineComponent}
+            people={allPeopleData}
+            onPersonClick={handlePersonClick}
+        />
 
         <!-- Person Panel -->
         <PersonPanel
@@ -66,13 +71,120 @@
             bind:isOpen={isPanelOpen}
             allPeople={allPeopleData}
         />
+
+        <!-- Scroll to Top Button -->
+        <ScrollToTop />
     </main>
 
     <!-- Footer -->
     <footer class="footer">
         <div class="footer-content">
-            <div class="footer-text">
-                <p>Norwegian Historical Figures • Data from Wikidata</p>
+            <div class="footer-left">
+                <div class="footer-controls">
+                    <button
+                        class="control-btn"
+                        title="Reset view"
+                        on:click={() => timelineComponent?.resetView()}
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                            <path d="M21 3v5h-5" />
+                            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                            <path d="M3 21v-5h5" />
+                        </svg>
+                    </button>
+                    <button
+                        class="control-btn"
+                        title="Scroll to start (700)"
+                        on:click={() => timelineComponent?.scrollToLeft()}
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="m11 17-5-5 5-5" />
+                            <path d="m18 17-5-5 5-5" />
+                        </svg>
+                    </button>
+                    <button
+                        class="control-btn"
+                        title="Scroll to end (2100)"
+                        on:click={() => timelineComponent?.scrollToRight()}
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="m6 17 5-5-5-5" />
+                            <path d="m13 17 5-5-5-5" />
+                        </svg>
+                    </button>
+                    <button
+                        class="control-btn"
+                        title="Zoom out"
+                        on:click={() => timelineComponent?.zoomOut()}
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="m21 21-4.35-4.35" />
+                            <path d="M8 11h6" />
+                        </svg>
+                    </button>
+                    <button
+                        class="control-btn"
+                        title="Zoom in"
+                        on:click={() => timelineComponent?.zoomIn()}
+                    >
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="m21 21-4.35-4.35" />
+                            <path d="M11 8v6" />
+                            <path d="M8 11h6" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="footer-text">
+                    <p>Norwegian Historical Figures • Data from Wikidata</p>
+                </div>
             </div>
             <div
                 class="footer-links"
@@ -104,9 +216,6 @@
             </div>
         </div>
     </footer>
-
-    <!-- Scroll to Top Button -->
-    <ScrollToTop />
 </div>
 
 <style>
@@ -183,6 +292,47 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+    }
+
+    .footer-left {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .footer-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        background: #f9fafb;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+    }
+
+    .control-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: transparent;
+        color: #6b7280;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        padding: 0;
+    }
+
+    .control-btn:hover {
+        background: white;
+        color: #1f2937;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .control-btn:active {
+        transform: scale(0.95);
     }
 
     .footer-text p {

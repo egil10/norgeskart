@@ -1,6 +1,7 @@
 import peopleData from './people.json';
 import type { Person } from '../types';
 import { getColorForOccupation } from '../config/colors';
+import { mapOccupationToFamily } from '../config/occupations';
 
 // Top 10 most famous Norwegians - always visible
 const TOP_FAMOUS: Record<string, number> = {
@@ -94,6 +95,14 @@ export function loadPeople(): Person[] {
 	const processed: Person[] = peopleData.map((person: any) => {
 		const prominenceScore = calculateProminenceScore(person);
 		const wikipediaSlug = extractWikipediaSlug(person.wikipediaUrl);
+		const occupations = person.occupations || [];
+		
+		// Determine color based on primary occupation if not already set
+		let color = person.color;
+		if (!color || color === '#999999' || color === '#999') {
+			const primaryOccupation = occupations[0] || '';
+			color = getColorForOccupation(primaryOccupation);
+		}
 		
 		return {
 			id: person.id,
@@ -104,8 +113,8 @@ export function loadPeople(): Person[] {
 			wikipediaUrl: person.wikipediaUrl || null,
 			wikipediaSlug,
 			summary: person.summary || '',
-			occupations: person.occupations || [],
-			color: person.color || '#999999',
+			occupations,
+			color,
 			prominenceScore
 		};
 	});
