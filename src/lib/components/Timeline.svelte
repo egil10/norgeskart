@@ -548,10 +548,21 @@
             height={margin.top +
                 Math.min(visibleLaneCount, maxLaneIndex + 1) * ROW_HEIGHT +
                 60}
-            style="cursor: grab;"
+            class="zoomable-svg"
         >
             {#if xScale}
                 {@const curX = xScale}
+                <!-- Background rect for dragging - placed FIRST so it's behind everything -->
+                <!-- This ensures empty areas are draggable while person blocks on top can still be clicked -->
+                <rect
+                    x="0"
+                    y="0"
+                    width="100%"
+                    height="100%"
+                    fill="transparent"
+                    style="pointer-events: all;"
+                />
+
                 <!-- Grid -->
                 {#each gridLines as year}
                     <line
@@ -561,18 +572,9 @@
                         y2="100%"
                         stroke="#e5e7eb"
                         stroke-width="1"
+                        style="pointer-events: none;"
                     />
                 {/each}
-
-                <!-- Background rect for dragging - ensures entire SVG area is draggable -->
-                <rect
-                    x="0"
-                    y="0"
-                    width="100%"
-                    height="100%"
-                    fill="transparent"
-                    style="pointer-events: all; cursor: grab;"
-                />
 
                 <!-- Blocks -->
                 {#each renderPeople as person (person.id)}
@@ -582,10 +584,17 @@
                         class="person-block"
                         transform="translate(0, {margin.top +
                             person.laneIndex * ROW_HEIGHT})"
-                        on:mousedown={handleMouseDown}
-                        on:mouseup={(e) => handleMouseUp(e, person)}
+                        on:mousedown={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e);
+                        }}
+                        on:mouseup={(e) => {
+                            e.stopPropagation();
+                            handleMouseUp(e, person);
+                        }}
                         on:mouseenter={handleMouseEnter}
                         on:mouseleave={handleMouseLeave}
+                        style="pointer-events: all;"
                     >
                         <rect
                             x={curX(person.birthYear)}
@@ -698,6 +707,19 @@
         box-shadow: 0 6px 8px rgba(0, 0, 0, 0.1);
     }
     .person-block {
+        cursor: pointer;
+    }
+
+    .zoomable-svg {
+        cursor: grab;
+        user-select: none;
+    }
+
+    .zoomable-svg:active {
+        cursor: grabbing;
+    }
+
+    .zoomable-svg .person-block {
         cursor: pointer;
     }
 </style>
