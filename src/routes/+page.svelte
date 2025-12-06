@@ -105,7 +105,7 @@
                     <button
                         class="control-btn"
                         title="Scroll to start (700)"
-                        on:click={() => timelineComponent?.scrollToLeft()}
+                        on:click={() => timelineComponent?.scrollToRight()}
                     >
                         <svg
                             width="16"
@@ -124,7 +124,7 @@
                     <button
                         class="control-btn"
                         title="Scroll to end (2100)"
-                        on:click={() => timelineComponent?.scrollToRight()}
+                        on:click={() => timelineComponent?.scrollToLeft()}
                     >
                         <svg
                             width="16"

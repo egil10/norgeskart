@@ -59,6 +59,7 @@
         const minYearPixel = baseXScale(MIN_YEAR);
         const minTx = margin.left - minYearPixel * k;
         
+        // Ensure we're at the leftmost valid position (year 700)
         select(mainSvg).call(
             zoom.transform as any,
             zoomIdentity.translate(minTx, zoomTransform.y).scale(k),
@@ -72,6 +73,7 @@
         const maxYearPixel = baseXScale(MAX_YEAR);
         const maxTx = width - margin.right - maxYearPixel * k;
         
+        // Ensure we're at the rightmost valid position (year 2100)
         select(mainSvg).call(
             zoom.transform as any,
             zoomIdentity.translate(maxTx, zoomTransform.y).scale(k),
@@ -91,8 +93,15 @@
         
         // Calculate new transform
         const scale = newK / currentK;
-        const newTx = centerX - (centerX - zoomTransform.x) * scale;
+        let newTx = centerX - (centerX - zoomTransform.x) * scale;
         const newTy = centerY - (centerY - zoomTransform.y) * scale;
+        
+        // Clamp to bounds after zoom
+        const minYearPixel = baseXScale(MIN_YEAR);
+        const maxYearPixel = baseXScale(MAX_YEAR);
+        const minTx = margin.left - minYearPixel * newK;
+        const maxTx = width - margin.right - maxYearPixel * newK;
+        newTx = Math.max(minTx, Math.min(maxTx, newTx));
         
         select(mainSvg).call(
             zoom.transform as any,
@@ -113,8 +122,15 @@
         
         // Calculate new transform
         const scale = newK / currentK;
-        const newTx = centerX - (centerX - zoomTransform.x) * scale;
+        let newTx = centerX - (centerX - zoomTransform.x) * scale;
         const newTy = centerY - (centerY - zoomTransform.y) * scale;
+        
+        // Clamp to bounds after zoom
+        const minYearPixel = baseXScale(MIN_YEAR);
+        const maxYearPixel = baseXScale(MAX_YEAR);
+        const minTx = margin.left - minYearPixel * newK;
+        const maxTx = width - margin.right - maxYearPixel * newK;
+        newTx = Math.max(minTx, Math.min(maxTx, newTx));
         
         select(mainSvg).call(
             zoom.transform as any,
@@ -237,21 +253,17 @@
 
         zoom.scaleExtent([minK, maxK]);
         
-        // Calculate translate extent to constrain panning to [MIN_YEAR, MAX_YEAR]
-        // translateExtent works in the coordinate space before transform
-        // We need to ensure that after transform, MIN_YEAR is at left edge and MAX_YEAR at right edge
+        // Calculate translateExtent based on current zoom level
+        // This constrains panning naturally without teleporting
         const currentK = zoomTransform?.k || minK;
         const minYearPixel = baseXScale(MIN_YEAR);
         const maxYearPixel = baseXScale(MAX_YEAR);
         
-        // For translateExtent, we calculate the bounds in the base coordinate space
-        // The transform formula is: x' = x * k + tx
-        // We want: margin.left = minYearPixel * k + minTx  => minTx = margin.left - minYearPixel * k
-        // And: width - margin.right = maxYearPixel * k + maxTx => maxTx = width - margin.right - maxYearPixel * k
+        // translateExtent constrains the translation in the coordinate space
+        // We want: after transform, MIN_YEAR at left edge and MAX_YEAR at right edge
         const minTx = margin.left - minYearPixel * currentK;
         const maxTx = width - margin.right - maxYearPixel * currentK;
         
-        // Set translateExtent - D3 will automatically clamp translations to these bounds
         zoom.translateExtent([
             [minTx, -Infinity],
             [maxTx, Infinity],
@@ -270,8 +282,12 @@
 
         zoom = d3Zoom<SVGSVGElement, unknown>()
             .filter((event) => {
-                if (event.type === "mousedown" || event.type === "touchstart")
+                // Allow all mouse and touch events for dragging/panning
+                if (event.type === "mousedown" || event.type === "touchstart" || 
+                    event.type === "mousemove" || event.type === "touchmove" ||
+                    event.type === "mouseup" || event.type === "touchend")
                     return true;
+                // Only allow wheel zoom with modifier keys
                 if (event.type === "wheel")
                     return event.ctrlKey || event.metaKey;
                 return false;
@@ -285,6 +301,11 @@
                     updateZoomExtents();
                     recalculateLayout();
                 } else {
+                    // Also update translateExtent on pan to keep constraints current
+                    // But do it in a way that doesn't interfere with dragging
+                    requestAnimationFrame(() => {
+                        updateZoomExtents();
+                    });
                     updateRenderState();
                 }
             });
@@ -453,6 +474,28 @@
         updateRenderState();
     }
 
+    // Track mouse down position to distinguish clicks from drags
+    let mouseDownPos: { x: number; y: number } | null = null;
+    const DRAG_THRESHOLD = 5; // pixels
+
+    function handleMouseDown(e: MouseEvent) {
+        mouseDownPos = { x: e.clientX, y: e.clientY };
+    }
+
+    function handleMouseUp(e: MouseEvent, person: Person) {
+        if (!mouseDownPos) return;
+        
+        const dx = Math.abs(e.clientX - mouseDownPos.x);
+        const dy = Math.abs(e.clientY - mouseDownPos.y);
+        
+        // Only trigger click if mouse didn't move much (it was a click, not a drag)
+        if (dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD) {
+            onPersonClick(person);
+        }
+        
+        mouseDownPos = null;
+    }
+
     function handleMouseEnter(e: MouseEvent) {
         (e.currentTarget as SVGGElement)
             .querySelector("rect")
@@ -471,10 +514,17 @@
         if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
             e.preventDefault();
             const current = zoomTransform;
-            const newTx = current.x - e.deltaX;
+            let newTx = current.x - e.deltaX;
 
-            // Let D3's translateExtent handle the clamping naturally
-            // This ensures smooth panning while respecting bounds
+            // Clamp to bounds before applying
+            if (baseXScale) {
+                const minYearPixel = baseXScale(MIN_YEAR);
+                const maxYearPixel = baseXScale(MAX_YEAR);
+                const minTx = margin.left - minYearPixel * current.k;
+                const maxTx = width - margin.right - maxYearPixel * current.k;
+                newTx = Math.max(minTx, Math.min(maxTx, newTx));
+            }
+
             select(mainSvg).call(
                 zoom.transform as any,
                 zoomIdentity.translate(newTx, current.y).scale(current.k),
@@ -498,6 +548,7 @@
             height={margin.top +
                 Math.min(visibleLaneCount, maxLaneIndex + 1) * ROW_HEIGHT +
                 60}
+            style="cursor: grab;"
         >
             {#if xScale}
                 {@const curX = xScale}
@@ -513,6 +564,16 @@
                     />
                 {/each}
 
+                <!-- Background rect for dragging - ensures entire SVG area is draggable -->
+                <rect
+                    x="0"
+                    y="0"
+                    width="100%"
+                    height="100%"
+                    fill="transparent"
+                    style="pointer-events: all; cursor: grab;"
+                />
+
                 <!-- Blocks -->
                 {#each renderPeople as person (person.id)}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -521,7 +582,8 @@
                         class="person-block"
                         transform="translate(0, {margin.top +
                             person.laneIndex * ROW_HEIGHT})"
-                        on:click|stopPropagation={() => onPersonClick(person)}
+                        on:mousedown={handleMouseDown}
+                        on:mouseup={(e) => handleMouseUp(e, person)}
                         on:mouseenter={handleMouseEnter}
                         on:mouseleave={handleMouseLeave}
                     >
