@@ -3,8 +3,11 @@
     import Timeline from "$lib/components/Timeline.svelte";
     import PersonPanel from "$lib/components/PersonPanel.svelte";
     import ScrollToTop from "$lib/components/ScrollToTop.svelte";
+    import CategoryFilter from "$lib/components/CategoryFilter.svelte";
     import type { Person } from "$lib/types";
     import { allPeople } from "$lib/data/people";
+    import { allOccupations } from "$lib/config/occupations";
+    import { getOccupationCategory } from "$lib/config/colors";
     import type { PageData } from "./$types";
 
     export let data: PageData;
@@ -13,6 +16,11 @@
     let selectedPerson: Person | null = null;
     let isPanelOpen = false;
     let timelineComponent: Timeline;
+    let selectedCategories: Set<string> = new Set(allOccupations);
+    let filteredPeople: Person[] = allPeopleData;
+    let showFilter = false;
+    let zoomLevel = 50; // 0-100 percentage
+    let isDraggingZoom = false;
 
     function handlePersonClick(person: Person) {
         selectedPerson = person;
@@ -27,9 +35,23 @@
         }
     }
 
+    let animationFrameId: number | null = null;
+
+    function updateZoomFromTimeline() {
+        if (timelineComponent && !isDraggingZoom) {
+            const newZoomLevel = timelineComponent.getZoomLevel();
+            if (Math.abs(newZoomLevel - zoomLevel) > 0.5) {
+                zoomLevel = newZoomLevel;
+            }
+        }
+        animationFrameId = requestAnimationFrame(updateZoomFromTimeline);
+    }
+
     onMount(() => {
         if (typeof window !== "undefined") {
             window.addEventListener("keydown", handleKeyDown);
+            // Start zoom level update loop
+            animationFrameId = requestAnimationFrame(updateZoomFromTimeline);
         }
     });
 
@@ -37,7 +59,87 @@
         if (typeof window !== "undefined") {
             window.removeEventListener("keydown", handleKeyDown);
         }
+        if (zoomUpdateFrame !== null) {
+            cancelAnimationFrame(zoomUpdateFrame);
+        }
+        if (animationFrameId !== null) {
+            cancelAnimationFrame(animationFrameId);
+        }
     });
+
+    function handleCategoriesChange(categories: Set<string>) {
+        selectedCategories = categories;
+    }
+
+    $: {
+        if (selectedCategories.size === 0) {
+            filteredPeople = [];
+        } else {
+            filteredPeople = allPeopleData.filter((person) => {
+                const personCategories = person.occupations.map(occ => 
+                    getOccupationCategory(occ)
+                );
+                return personCategories.some(cat => selectedCategories.has(cat));
+            });
+        }
+    }
+
+
+    let zoomUpdateFrame: number | null = null;
+    let pendingZoomValue: number | null = null;
+
+    function handleZoomInput(event: Event) {
+        const target = event.target as HTMLInputElement;
+        const value = parseFloat(target.value);
+        zoomLevel = value;
+        pendingZoomValue = value;
+        isDraggingZoom = true;
+        
+        // Throttle updates using requestAnimationFrame
+        if (zoomUpdateFrame === null) {
+            zoomUpdateFrame = requestAnimationFrame(() => {
+                if (pendingZoomValue !== null && timelineComponent) {
+                    timelineComponent.setZoomLevel(pendingZoomValue);
+                }
+                zoomUpdateFrame = null;
+                pendingZoomValue = null;
+            });
+        }
+    }
+
+    function handleZoomChange(event: Event) {
+        const target = event.target as HTMLInputElement;
+        const value = parseFloat(target.value);
+        zoomLevel = value;
+        isDraggingZoom = true;
+        // Cancel any pending animation frame
+        if (zoomUpdateFrame !== null) {
+            cancelAnimationFrame(zoomUpdateFrame);
+            zoomUpdateFrame = null;
+        }
+        pendingZoomValue = null;
+        timelineComponent?.setZoomLevel(value);
+    }
+
+    function handleZoomMouseDown() {
+        // Capture center year when drag starts
+        timelineComponent?.captureCenterYear();
+        isDraggingZoom = true;
+    }
+
+    function handleZoomMouseUp() {
+        isDraggingZoom = false;
+        timelineComponent?.clearCenterYear();
+        // Apply any pending zoom value
+        if (pendingZoomValue !== null && timelineComponent) {
+            timelineComponent.setZoomLevel(pendingZoomValue);
+            pendingZoomValue = null;
+        }
+        if (zoomUpdateFrame !== null) {
+            cancelAnimationFrame(zoomUpdateFrame);
+            zoomUpdateFrame = null;
+        }
+    }
 
     // Theme - LIGHT MODE ONLY
 </script>
@@ -46,14 +148,43 @@
     <!-- Header -->
     <header class="header">
         <div class="header-content">
-            <div>
-                <h1 class="title">Norwegian Historical Figures</h1>
-                <p class="subtitle">
-                    Interactive timeline • {allPeopleData.length} people from {Math.min(
-                        ...allPeopleData.map((p) => p.birthYear),
-                    )} to present
-                </p>
+            <div class="header-main">
+                <div>
+                    <h1 class="title">Norwegian Historical Figures</h1>
+                    <p class="subtitle">
+                        Interactive timeline • {filteredPeople.length} of {allPeopleData.length} people from {Math.min(
+                            ...allPeopleData.map((p) => p.birthYear),
+                        )} to present
+                    </p>
+                </div>
+                <button
+                    class="filter-toggle-btn"
+                    on:click={() => showFilter = !showFilter}
+                    class:active={showFilter}
+                    title="Filtre"
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                </button>
             </div>
+            {#if showFilter}
+                <div class="filter-container">
+                    <CategoryFilter
+                        selectedCategories={selectedCategories}
+                        onCategoriesChange={handleCategoriesChange}
+                    />
+                </div>
+            {/if}
         </div>
     </header>
 
@@ -61,7 +192,7 @@
     <main class="main-content">
         <Timeline
             bind:this={timelineComponent}
-            people={allPeopleData}
+            people={filteredPeople}
             onPersonClick={handlePersonClick}
         />
 
@@ -160,6 +291,21 @@
                             <path d="M8 11h6" />
                         </svg>
                     </button>
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={zoomLevel}
+                        on:input={handleZoomInput}
+                        on:change={handleZoomChange}
+                        on:mousedown={handleZoomMouseDown}
+                        on:mouseup={handleZoomMouseUp}
+                        on:touchstart={handleZoomMouseDown}
+                        on:touchend={handleZoomMouseUp}
+                        class="zoom-slider-inline"
+                        title="Zoom level"
+                    />
                     <button
                         class="control-btn"
                         title="Zoom in"
@@ -256,6 +402,62 @@
         margin: 0 auto;
     }
 
+    .header-main {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+    }
+
+    .filter-toggle-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        color: #6b7280;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .filter-toggle-btn:hover {
+        background: white;
+        color: #1f2937;
+        border-color: #d1d5db;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .filter-toggle-btn.active {
+        background: #1f2937;
+        color: white;
+        border-color: #1f2937;
+    }
+
+    .filter-toggle-btn.active:hover {
+        background: #374151;
+        border-color: #374151;
+    }
+
+    .filter-container {
+        margin-top: 16px;
+        animation: slideDown 0.2s ease;
+    }
+
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
     .title {
         font-size: 20px;
         font-weight: 600;
@@ -340,6 +542,60 @@
         font-size: 12px;
         color: #6b7280;
         font-weight: 400;
+    }
+
+    .zoom-slider-inline {
+        width: 120px;
+        height: 4px;
+        background: #e5e7eb;
+        border-radius: 2px;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+        cursor: pointer;
+        margin: 0 4px;
+        flex-shrink: 0;
+    }
+
+    .zoom-slider-inline::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        background: #6b7280;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .zoom-slider-inline::-webkit-slider-thumb:hover {
+        background: #1f2937;
+        transform: scale(1.1);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    }
+
+    .zoom-slider-inline::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        background: #6b7280;
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .zoom-slider-inline::-moz-range-thumb:hover {
+        background: #1f2937;
+        transform: scale(1.1);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    }
+
+    .zoom-slider-inline::-moz-range-track {
+        background: #e5e7eb;
+        height: 4px;
+        border-radius: 2px;
     }
 
     .footer-links {

@@ -138,6 +138,60 @@
         );
     }
 
+    export function getZoomLevel(): number {
+        if (!zoom || !baseXScale) return 50;
+        
+        const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS; // 2.5 (zoomed out)
+        const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS; // 10 (zoomed in)
+        const currentK = zoomTransform?.k || minK;
+        
+        // Convert k value to percentage (0-100)
+        // 0% = minK (zoomed out), 100% = maxK (zoomed in)
+        const percentage = ((currentK - minK) / (maxK - minK)) * 100;
+        return Math.max(0, Math.min(100, percentage));
+    }
+
+    export function captureCenterYear() {
+        // Capture the center year when drag starts - use this fixed value throughout the drag
+        if (!baseXScale || !zoomTransform || width === 0) return;
+        const centerX = width / 2;
+        const currentScale = zoomTransform.rescaleX(baseXScale);
+        fixedCenterYear = currentScale.invert(centerX);
+    }
+
+    export function clearCenterYear() {
+        fixedCenterYear = null;
+    }
+
+    export function setZoomLevel(percentage: number) {
+        if (!mainSvg || !zoom || !baseXScale || width === 0 || !zoomTransform) return;
+        
+        const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS; // 2.5 (zoomed out)
+        const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS; // 10 (zoomed in)
+        
+        // Clamp percentage to 0-100
+        const clampedPercentage = Math.max(0, Math.min(100, percentage));
+        
+        // Convert percentage to k value
+        const newK = minK + (clampedPercentage / 100) * (maxK - minK);
+        
+        // Get the viewport center point
+        const centerX = width / 2;
+        const centerY = 0;
+        const point = [centerX, centerY] as [number, number];
+        
+        // Use D3's scaleTo method which zooms to a specific scale while keeping a point fixed
+        // This is exactly how Ctrl+wheel zoom works - it zooms around the pointer/center point
+        select(mainSvg).call(
+            zoom.scaleTo as any,
+            newK,
+            point
+        );
+        
+        // Update zoom level variable
+        currentZoomLevel = clampedPercentage;
+    }
+
     // Elements
     let mainSvg: SVGSVGElement;
     let axisSvg: SVGSVGElement;
@@ -154,6 +208,8 @@
     let xScale: ScaleLinear<number, number> | null = null;
     let zoomTransform: ZoomTransform = zoomIdentity;
     let isInitialLoad = true;
+    let currentZoomLevel = 50; // 0-100 percentage
+    let fixedCenterYear: number | null = null; // Center year to preserve during zoom drag
 
     // Data State
     type VisiblePerson = Person & { laneIndex: number };
@@ -219,8 +275,6 @@
     }
 
     onMount(() => {
-        if (!people || people.length === 0) return;
-
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 if (entry.target === viewport) {
@@ -228,8 +282,8 @@
                     height = entry.contentRect.height;
                 }
             }
-            // Debounce slightly or just run
-            if (width > 0 && !zoom) {
+            // Initialize zoom when viewport is sized and we have people data
+            if (width > 0 && !zoom && people && people.length > 0) {
                 initializeZoom();
             } else if (zoom) {
                 // Update zoom extents if width changes
@@ -281,7 +335,7 @@
     }
 
     function initializeZoom() {
-        if (!mainSvg || width === 0) return;
+        if (!mainSvg || width === 0 || !people || people.length === 0) return;
 
         // Base scale spans the ENTIRE possible time range
         baseXScale = scaleLinear()
@@ -305,6 +359,12 @@
             .on("zoom", (event) => {
                 const oldK = zoomTransform.k;
                 zoomTransform = event.transform;
+
+                // Update zoom level for slider
+                const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
+                const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS;
+                currentZoomLevel = ((zoomTransform.k - minK) / (maxK - minK)) * 100;
+                currentZoomLevel = Math.max(0, Math.min(100, currentZoomLevel));
 
                 // Only update translate extents when zoom level (scale) changes
                 // Don't update during panning to avoid teleporting
@@ -331,6 +391,12 @@
         // Set initial transform state
         zoomTransform = zoomIdentity.translate(tX, 0).scale(initialK);
         
+        // Update initial zoom level
+        const minK = TOTAL_YEARS / MAX_VISIBLE_YEARS;
+        const maxK = TOTAL_YEARS / MIN_VISIBLE_YEARS;
+        currentZoomLevel = ((initialK - minK) / (maxK - minK)) * 100;
+        currentZoomLevel = Math.max(0, Math.min(100, currentZoomLevel));
+        
         // Now update extents with the correct initial transform
         updateZoomExtents();
 
@@ -341,6 +407,9 @@
                 zoom.transform as any,
                 zoomTransform,
             );
+
+        // Calculate initial layout after setting up zoom
+        recalculateLayout();
     }
 
     function getProminenceThreshold(zoomScale: number): number {
@@ -363,7 +432,7 @@
 
     // STABLE LAYOUT ALGORITHM
     function recalculateLayout() {
-        if (!baseXScale || !zoomTransform) return;
+        if (!baseXScale || !zoomTransform || !people || people.length === 0) return;
 
         // 1. Identify all candidates for this Scale
         const currentScale = zoomTransform.rescaleX(baseXScale);
@@ -422,6 +491,16 @@
         }
 
         updateRenderState();
+    }
+
+    // Recalculate layout when people data changes (but only after zoom is initialized)
+    let lastPeopleLength = 0;
+    $: if (people && people.length !== lastPeopleLength && baseXScale && zoomTransform && zoom) {
+        lastPeopleLength = people.length;
+        // Only recalculate if zoom is already initialized and we have a valid state
+        if (width > 0 && mainSvg) {
+            recalculateLayout();
+        }
     }
 
     function updateRenderState() {

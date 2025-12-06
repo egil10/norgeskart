@@ -92,32 +92,56 @@ function extractWikipediaSlug(url: string | null): string | undefined {
 }
 
 export function loadPeople(): Person[] {
-	const processed: Person[] = peopleData.map((person: any) => {
-		const prominenceScore = calculateProminenceScore(person);
-		const wikipediaSlug = extractWikipediaSlug(person.wikipediaUrl);
-		const occupations = person.occupations || [];
-		
-		// Determine color based on primary occupation if not already set
-		let color = person.color;
-		if (!color || color === '#999999' || color === '#999') {
-			const primaryOccupation = occupations[0] || '';
-			color = getColorForOccupation(primaryOccupation);
-		}
-		
-		return {
-			id: person.id,
-			name: person.name,
-			birthYear: person.birthYear,
-			deathYear: person.deathYear || null,
-			imageUrl: person.imageUrl || null,
-			wikipediaUrl: person.wikipediaUrl || null,
-			wikipediaSlug,
-			summary: person.summary || '',
-			occupations,
-			color,
-			prominenceScore
-		};
-	});
+	const currentYear = new Date().getFullYear();
+	const MAX_AGE = 120;
+
+	const processed: Person[] = peopleData
+		.map((person: any) => {
+			const prominenceScore = calculateProminenceScore(person);
+			const wikipediaSlug = extractWikipediaSlug(person.wikipediaUrl);
+			const occupations = person.occupations || [];
+			
+			// Determine color based on primary occupation if not already set
+			let color = person.color;
+			if (!color || color === '#999999' || color === '#999') {
+				const primaryOccupation = occupations[0] || '';
+				color = getColorForOccupation(primaryOccupation);
+			}
+			
+			return {
+				id: person.id,
+				name: person.name,
+				birthYear: person.birthYear,
+				deathYear: person.deathYear || null,
+				imageUrl: person.imageUrl || null,
+				wikipediaUrl: person.wikipediaUrl || null,
+				wikipediaSlug,
+				summary: person.summary || '',
+				occupations,
+				color,
+				prominenceScore
+			};
+		})
+		.filter((person: Person) => {
+			// Validate birth year is reasonable (not in the future, not too far in the past)
+			if (person.birthYear > currentYear || person.birthYear < 500) {
+				return false;
+			}
+
+			// Filter out people with impossible ages (more than 120 years)
+			if (person.deathYear === null) {
+				// Living person: check age against current year
+				const age = currentYear - person.birthYear;
+				return age <= MAX_AGE && age >= 0;
+			} else {
+				// Deceased person: check lifespan and validate death year
+				if (person.deathYear < person.birthYear || person.deathYear > currentYear) {
+					return false; // Invalid death year
+				}
+				const lifespan = person.deathYear - person.birthYear;
+				return lifespan <= MAX_AGE && lifespan > 0; // Also ensure positive lifespan
+			}
+		});
 
 	// Sort by birth year
 	processed.sort((a, b) => a.birthYear - b.birthYear);
@@ -140,4 +164,3 @@ export const allPeople = loadPeople();
 export const topPeople = [...allPeople]
 	.sort((a, b) => b.prominenceScore - a.prominenceScore)
 	.slice(0, 10);
-
