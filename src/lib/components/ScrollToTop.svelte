@@ -102,6 +102,23 @@
         z-index: 1000;
         color: #1f2937;
         margin: 0;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    @media (max-width: 768px) {
+        .scroll-to-top {
+            bottom: 20px;
+            right: 16px;
+            width: 52px;
+            height: 52px;
+            min-width: 44px; /* iOS minimum tap target */
+            min-height: 44px;
+        }
+
+        .scroll-to-top svg {
+            width: 22px;
+            height: 22px;
+        }
     }
 
     .scroll-to-top.visible {

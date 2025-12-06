@@ -385,6 +385,12 @@
         z-index: 10;
     }
 
+    @media (max-width: 768px) {
+        .header {
+            padding: 12px 16px;
+        }
+    }
+
     .header-content {
         max-width: 1400px;
         margin: 0 auto;
@@ -398,6 +404,23 @@
         flex-wrap: wrap;
     }
 
+    @media (max-width: 768px) {
+        .header-main {
+            gap: 12px;
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .header-title-section {
+            width: 100%;
+        }
+
+        .header-controls-section {
+            width: 100%;
+            justify-content: space-between;
+        }
+    }
+
     .header-title-section {
         flex: 1;
         min-width: 0;
@@ -409,6 +432,12 @@
         gap: 8px;
     }
 
+    @media (max-width: 768px) {
+        .header-controls-section {
+            gap: 6px;
+        }
+    }
+
     .header-controls {
         display: flex;
         align-items: center;
@@ -417,6 +446,14 @@
         background: #f9fafb;
         border-radius: 8px;
         border: 1px solid #e5e7eb;
+    }
+
+    @media (max-width: 768px) {
+        .header-controls {
+            gap: 2px;
+            padding: 3px;
+            border-radius: 6px;
+        }
     }
 
     .filter-toggle-btn {
@@ -432,6 +469,19 @@
         cursor: pointer;
         transition: all 0.2s ease;
         padding: 0;
+    }
+
+    @media (max-width: 768px) {
+        .filter-toggle-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+        }
+
+        .filter-toggle-btn svg {
+            width: 18px;
+            height: 18px;
+        }
     }
 
     .filter-toggle-btn:hover {
@@ -458,6 +508,12 @@
         animation: slideDown 0.2s ease;
     }
 
+    @media (max-width: 768px) {
+        .filter-container {
+            margin-top: 12px;
+        }
+    }
+
     @keyframes slideDown {
         from {
             opacity: 0;
@@ -479,6 +535,13 @@
         user-select: none;
     }
 
+    @media (max-width: 768px) {
+        .title {
+            font-size: 18px;
+            margin: 0 0 2px 0;
+        }
+    }
+
     .title:hover {
         color: #1f2937;
     }
@@ -492,6 +555,12 @@
         margin: 0;
         color: #6b7280;
         font-weight: 400;
+    }
+
+    @media (max-width: 768px) {
+        .subtitle {
+            font-size: 11px;
+        }
     }
 
     .main-content {
@@ -518,6 +587,19 @@
         text-decoration: none;
     }
 
+    @media (max-width: 768px) {
+        .control-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+        }
+
+        .control-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+    }
+
     .control-btn:hover {
         background: white;
         color: #1f2937;
@@ -542,6 +624,14 @@
         flex-shrink: 0;
     }
 
+    @media (max-width: 768px) {
+        .zoom-slider-inline {
+            width: 80px;
+            height: 6px;
+            margin: 0 2px;
+        }
+    }
+
     .zoom-slider-inline::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
@@ -552,6 +642,13 @@
         cursor: pointer;
         transition: all 0.2s ease;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    @media (max-width: 768px) {
+        .zoom-slider-inline::-webkit-slider-thumb {
+            width: 18px;
+            height: 18px;
+        }
     }
 
     .zoom-slider-inline::-webkit-slider-thumb:hover {
@@ -569,6 +666,13 @@
         border: none;
         transition: all 0.2s ease;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    @media (max-width: 768px) {
+        .zoom-slider-inline::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+        }
     }
 
     .zoom-slider-inline::-moz-range-thumb:hover {

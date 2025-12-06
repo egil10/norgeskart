@@ -112,6 +112,14 @@
 		justify-content: center;
 		z-index: 50;
 		padding: 20px;
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	@media (max-width: 768px) {
+		.modal-backdrop {
+			padding: 0;
+			align-items: flex-end;
+		}
 	}
 
 	.modal-card {
@@ -124,6 +132,18 @@
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 		position: relative;
 		border: 1px solid #e5e7eb;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	@media (max-width: 768px) {
+		.modal-card {
+			max-width: 100%;
+			max-height: 90vh;
+			border-radius: 16px 16px 0 0;
+			border-left: none;
+			border-right: none;
+			border-bottom: none;
+		}
 	}
 
 	.close-btn {
@@ -151,6 +171,12 @@
 
 	.card-content {
 		padding: 24px;
+	}
+
+	@media (max-width: 768px) {
+		.card-content {
+			padding: 20px;
+		}
 	}
 
 	.person-image {

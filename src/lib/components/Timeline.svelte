@@ -687,6 +687,22 @@
                             e.stopPropagation();
                             handleMouseUp(e, person);
                         }}
+                        on:touchstart={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e);
+                        }}
+                        on:touchend={(e) => {
+                            e.stopPropagation();
+                            if (e.changedTouches && e.changedTouches[0]) {
+                                const touch = e.changedTouches[0];
+                                const syntheticEvent = {
+                                    ...e,
+                                    clientX: touch.clientX,
+                                    clientY: touch.clientY,
+                                } as MouseEvent;
+                                handleMouseUp(syntheticEvent, person);
+                            }
+                        }}
                         on:mouseenter={handleMouseEnter}
                         on:mouseleave={handleMouseLeave}
                         style="pointer-events: all;"
@@ -747,6 +763,7 @@
         height: 100%;
         display: flex;
         flex-direction: column;
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
         background: #faf9f6;
         position: relative;
     }
@@ -755,6 +772,14 @@
         overflow-y: auto;
         overflow-x: hidden;
         position: relative;
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    }
+
+    @media (max-width: 768px) {
+        .main-viewport {
+            /* Better touch scrolling on mobile */
+            overscroll-behavior: contain;
+        }
     }
     .axis-container {
         height: 40px;
@@ -783,6 +808,13 @@
         padding-bottom: 20px;
         padding-top: 40px;
         min-height: 0;
+    }
+
+    @media (max-width: 768px) {
+        .load-more-container {
+            padding-bottom: 16px;
+            padding-top: 32px;
+        }
     }
     .load-more-btn {
         pointer-events: auto;
