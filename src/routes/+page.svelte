@@ -153,8 +153,26 @@
                 <div class="header-title-section">
                     <h1 
                         class="title" 
-                        on:click={() => timelineComponent?.resetView()}
-                        on:keydown={(e) => e.key === 'Enter' && timelineComponent?.resetView()}
+                        on:click={() => {
+                            timelineComponent?.resetView();
+                            // Update slider immediately after reset
+                            requestAnimationFrame(() => {
+                                if (timelineComponent) {
+                                    zoomLevel = timelineComponent.getZoomLevel();
+                                }
+                            });
+                        }}
+                        on:keydown={(e) => {
+                            if (e.key === 'Enter') {
+                                timelineComponent?.resetView();
+                                // Update slider immediately after reset
+                                requestAnimationFrame(() => {
+                                    if (timelineComponent) {
+                                        zoomLevel = timelineComponent.getZoomLevel();
+                                    }
+                                });
+                            }
+                        }}
                         role="button"
                         tabindex="0"
                     >Norske historiske personer</h1>
@@ -169,7 +187,15 @@
                         <button
                             class="control-btn"
                             title="Reset view"
-                            on:click={() => timelineComponent?.resetView()}
+                            on:click={() => {
+                                timelineComponent?.resetView();
+                                // Update slider immediately after reset
+                                requestAnimationFrame(() => {
+                                    if (timelineComponent) {
+                                        zoomLevel = timelineComponent.getZoomLevel();
+                                    }
+                                });
+                            }}
                         >
                             <svg
                                 width="16"
