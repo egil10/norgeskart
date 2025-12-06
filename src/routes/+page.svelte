@@ -10,6 +10,7 @@
     import { getOccupationCategory } from "$lib/config/colors";
     import type { PageData } from "./$types";
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     export let data: PageData;
 
     let allPeopleData: Person[] = allPeople;
@@ -150,7 +151,13 @@
         <div class="header-content">
             <div class="header-main">
                 <div class="header-title-section">
-                    <h1 class="title" on:click={() => timelineComponent?.resetView()}>Norwegian Historical Figures</h1>
+                    <h1 
+                        class="title" 
+                        on:click={() => timelineComponent?.resetView()}
+                        on:keydown={(e) => e.key === 'Enter' && timelineComponent?.resetView()}
+                        role="button"
+                        tabindex="0"
+                    >Norwegian Historical Figures</h1>
                     <p class="subtitle">
                         Timeline of {allPeopleData.length} famous Norwegians from {Math.min(
                             ...allPeopleData.map((p) => p.birthYear),

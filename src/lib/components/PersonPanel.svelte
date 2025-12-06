@@ -4,6 +4,7 @@
 
 	export let person: Person | null = null;
 	export let isOpen = false;
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	export let allPeople: Person[] = [];
 
 	function close() {
@@ -32,9 +33,10 @@
 	<div
 		class="modal-backdrop"
 		on:click={handleBackdropClick}
+		on:keydown={(e) => e.key === 'Escape' && close()}
 		transition:fade={{ duration: 150 }}
 		role="button"
-		tabindex="-1"
+		tabindex="0"
 	>
 		<div
 			class="modal-card"

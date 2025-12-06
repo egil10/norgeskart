@@ -212,6 +212,7 @@
     let renderPeople: VisiblePerson[] = [];
     let visibleLaneCount = INITIAL_VISIBLE_LANES;
     let maxLaneIndex = 0;
+    let hasMoreDataInViewport = false; // Track if there's more data in current viewport
 
     function getPersonColor(person: Person): string {
         // Use the person's color if available (based on occupation)
@@ -450,10 +451,10 @@
         // On initial load, ensure we show at least 30 people
         if (isInitialLoad) {
             // Try to get at least 30 people by lowering threshold if needed
-            let candidates = people.filter((p) => p.prominenceScore >= threshold);
+            const initialCandidates = people.filter((p) => p.prominenceScore >= threshold);
             
             // If we have fewer than 30 candidates, lower the threshold
-            if (candidates.length < 30) {
+            if (initialCandidates.length < 30) {
                 // Sort people by prominence score descending
                 const sortedByProminence = [...people].sort(
                     (a, b) => b.prominenceScore - a.prominenceScore
@@ -461,7 +462,12 @@
                 // Get the 30th person's score (or last person if fewer than 30)
                 const minPeopleToShow = Math.min(30, people.length);
                 if (sortedByProminence.length >= minPeopleToShow) {
-                    threshold = sortedByProminence[minPeopleToShow - 1].prominenceScore;
+                    const targetPerson = sortedByProminence[minPeopleToShow - 1];
+                    if (targetPerson) {
+                        threshold = targetPerson.prominenceScore;
+                    } else {
+                        threshold = 0;
+                    }
                 } else {
                     threshold = 0; // Show all if we have fewer than 30 total
                 }
@@ -528,6 +534,9 @@
 
         // 2. Filter by Vertical Lane Limit (Lazy Loading)
         renderPeople = xFiltered.filter((p) => p.laneIndex < visibleLaneCount);
+
+        // 3. Check if there's more data in the current viewport that hasn't been loaded
+        hasMoreDataInViewport = xFiltered.some((p) => p.laneIndex >= visibleLaneCount);
 
         renderAxis();
     }
@@ -599,7 +608,7 @@
         mouseDownPos = { x: e.clientX, y: e.clientY };
     }
 
-    function handleMouseUp(e: MouseEvent, person: Person) {
+    function handleMouseUp(e: MouseEvent | { clientX: number; clientY: number }, person: Person) {
         if (!mouseDownPos) return;
         
         const dx = Math.abs(e.clientX - mouseDownPos.x);
@@ -695,12 +704,10 @@
                             e.stopPropagation();
                             if (e.changedTouches && e.changedTouches[0]) {
                                 const touch = e.changedTouches[0];
-                                const syntheticEvent = {
-                                    ...e,
+                                handleMouseUp({
                                     clientX: touch.clientX,
                                     clientY: touch.clientY,
-                                } as MouseEvent;
-                                handleMouseUp(syntheticEvent, person);
+                                }, person);
                             }
                         }}
                         on:mouseenter={handleMouseEnter}
@@ -739,8 +746,8 @@
         </svg>
 
         <!-- Load More Overlay -->
-        <!-- Only show if we actually have hidden lanes AND user is scrolled near bottom -->
-        {#if visibleLaneCount <= maxLaneIndex && isNearBottom}
+        <!-- Only show if we have more data in current viewport AND user is scrolled near bottom -->
+        {#if hasMoreDataInViewport && isNearBottom}
             <div class="load-more-container">
                 <button class="load-more-btn" on:click={loadMore}>
                     Vis flere ({maxLaneIndex - visibleLaneCount + 1})
